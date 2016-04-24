@@ -1,0 +1,9 @@
+lt <
+leq <=
+gt >
+geq >=
+eq ==
+neq =~
+and &&
+or ||
+xor xor
