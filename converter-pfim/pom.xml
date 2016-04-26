@@ -30,7 +30,19 @@
 
 		<dependency>
 			<groupId>crx</groupId>
-			<artifactId>converter-r</artifactId>
+			<artifactId>converter-atomic</artifactId>
+			<version>0.0.8</version>
+		</dependency>
+		
+		<dependency>
+			<groupId>crx</groupId>
+			<artifactId>converter-tree</artifactId>
+			<version>0.0.8</version>
+		</dependency>
+		
+		<dependency>
+			<groupId>crx</groupId>
+			<artifactId>converter-spi</artifactId>
 			<version>0.0.8</version>
 		</dependency>
 	</dependencies>

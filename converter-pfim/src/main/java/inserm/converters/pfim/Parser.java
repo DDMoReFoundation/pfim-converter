@@ -16,11 +16,58 @@
 
 package inserm.converters.pfim;
 
-import static crx.converter.engine.BaseModelWriter.vector;
+import static crx.converter.engine.PharmMLTypeChecker.isBinaryOperation;
+import static crx.converter.engine.PharmMLTypeChecker.isCategoricalRelation;
+import static crx.converter.engine.PharmMLTypeChecker.isColumnDefinition;
 import static crx.converter.engine.PharmMLTypeChecker.isCommonParameter;
+import static crx.converter.engine.PharmMLTypeChecker.isConstant;
+import static crx.converter.engine.PharmMLTypeChecker.isContinuousCovariate;
+import static crx.converter.engine.PharmMLTypeChecker.isCovariate;
+import static crx.converter.engine.PharmMLTypeChecker.isCovariateTransform;
+import static crx.converter.engine.PharmMLTypeChecker.isDelay;
+import static crx.converter.engine.PharmMLTypeChecker.isDerivative;
+import static crx.converter.engine.PharmMLTypeChecker.isFalse;
+import static crx.converter.engine.PharmMLTypeChecker.isFunction;
+import static crx.converter.engine.PharmMLTypeChecker.isFunctionCall;
+import static crx.converter.engine.PharmMLTypeChecker.isFunctionParameter;
+import static crx.converter.engine.PharmMLTypeChecker.isGeneralError;
+import static crx.converter.engine.PharmMLTypeChecker.isIndependentVariable;
+import static crx.converter.engine.PharmMLTypeChecker.isIndividualParameter;
+import static crx.converter.engine.PharmMLTypeChecker.isInitialCondition;
+import static crx.converter.engine.PharmMLTypeChecker.isInt;
+import static crx.converter.engine.PharmMLTypeChecker.isInterpolation;
+import static crx.converter.engine.PharmMLTypeChecker.isInterval;
+import static crx.converter.engine.PharmMLTypeChecker.isJAXBElement;
 import static crx.converter.engine.PharmMLTypeChecker.isLocalVariable;
+import static crx.converter.engine.PharmMLTypeChecker.isLogicalBinaryOperation;
+import static crx.converter.engine.PharmMLTypeChecker.isLogicalUnaryOperation;
+import static crx.converter.engine.PharmMLTypeChecker.isMatrix;
+import static crx.converter.engine.PharmMLTypeChecker.isMatrixCell;
+import static crx.converter.engine.PharmMLTypeChecker.isMatrixSelector;
+import static crx.converter.engine.PharmMLTypeChecker.isMatrixUnaryOperation;
+import static crx.converter.engine.PharmMLTypeChecker.isObservationError;
+import static crx.converter.engine.PharmMLTypeChecker.isParameterEstimate;
+import static crx.converter.engine.PharmMLTypeChecker.isPiece;
+import static crx.converter.engine.PharmMLTypeChecker.isPiecewise;
+import static crx.converter.engine.PharmMLTypeChecker.isPopulationParameter;
+import static crx.converter.engine.PharmMLTypeChecker.isProbability;
+import static crx.converter.engine.PharmMLTypeChecker.isProduct;
+import static crx.converter.engine.PharmMLTypeChecker.isRandomVariable;
+import static crx.converter.engine.PharmMLTypeChecker.isReal;
+import static crx.converter.engine.PharmMLTypeChecker.isRhs;
+import static crx.converter.engine.PharmMLTypeChecker.isRootType;
+import static crx.converter.engine.PharmMLTypeChecker.isScalarInterface;
+import static crx.converter.engine.PharmMLTypeChecker.isSequence;
+import static crx.converter.engine.PharmMLTypeChecker.isString;
+import static crx.converter.engine.PharmMLTypeChecker.isSum;
 import static crx.converter.engine.PharmMLTypeChecker.isSymbolReference;
+import static crx.converter.engine.PharmMLTypeChecker.isTrue;
+import static crx.converter.engine.PharmMLTypeChecker.isUnaryOperation;
+import static crx.converter.engine.PharmMLTypeChecker.isVariabilityLevelDefinition;
+import static crx.converter.engine.PharmMLTypeChecker.isVariableReference;
 import static crx.converter.engine.PharmMLTypeChecker.isVector;
+import static crx.converter.engine.PharmMLTypeChecker.isVectorSelector;
+import static crx.converter.engine.Utils.getClassName;
 import static inserm.converters.pfim.GenericOption.ALPHA;
 import static inserm.converters.pfim.GenericOption.ATOL;
 import static inserm.converters.pfim.GenericOption.BETA_COVARIATE;
@@ -75,6 +122,7 @@ import static inserm.converters.pfim.SimplexOption.SAMPLING_TIME_LOWER_B;
 import static inserm.converters.pfim.SimplexOption.SAMPLING_TIME_UPPER_A;
 import static inserm.converters.pfim.SimplexOption.SAMPLING_TIME_UPPER_B;
 import static inserm.converters.pfim.SimplexOption.SIMPLEX_PARAMETER;
+import inserm.converters.pfim.parts.CovariateBlockImpl;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -82,32 +130,61 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
+
+import javax.xml.bind.JAXBElement;
 
 import crx.converter.engine.Accessor;
+import crx.converter.engine.CategoryRef_;
+import crx.converter.engine.ConversionDetail_;
+import crx.converter.engine.FixedEffectCategoryRef;
+import crx.converter.engine.FixedParameter;
+import crx.converter.engine.SymbolReader.ModifiedSymbol;
+import crx.converter.engine.common.BaseParser;
 import crx.converter.engine.common.CategoryProportions;
+import crx.converter.engine.common.ConditionalDoseEventRef;
 import crx.converter.engine.common.CovariateParameterRef;
-import crx.converter.engine.parts.CategoricalCovariateRef;
-import crx.converter.engine.parts.CovariateBlockImpl;
+import crx.converter.engine.common.IndividualParameterAssignment;
+//import crx.converter.engine.parts.CategoricalCovariateRef;
+//import crx.converter.engine.parts.CovariateBlockImpl;
 import crx.converter.spi.blocks.CovariateBlock;
 import crx.converter.spi.blocks.ParameterBlock;
 import crx.converter.spi.blocks.StructuralBlock;
 import crx.converter.spi.steps.EstimationStep;
 import crx.converter.tree.BinaryTree;
+import crx.converter.tree.Node;
 import crx.converter.tree.TreeMaker;
+import crx.converter.tree.Utils;
+import eu.ddmore.convertertoolbox.api.response.ConversionDetail;
+import eu.ddmore.libpharmml.dom.IndependentVariable;
 import eu.ddmore.libpharmml.dom.commontypes.BooleanValue;
+import eu.ddmore.libpharmml.dom.commontypes.Delay;
+import eu.ddmore.libpharmml.dom.commontypes.DerivativeVariable;
 import eu.ddmore.libpharmml.dom.commontypes.FalseBoolean;
+import eu.ddmore.libpharmml.dom.commontypes.FunctionDefinition;
+import eu.ddmore.libpharmml.dom.commontypes.FunctionParameter;
 import eu.ddmore.libpharmml.dom.commontypes.IntValue;
+import eu.ddmore.libpharmml.dom.commontypes.Interpolation;
+import eu.ddmore.libpharmml.dom.commontypes.Interval;
 import eu.ddmore.libpharmml.dom.commontypes.Matrix;
+import eu.ddmore.libpharmml.dom.commontypes.MatrixCell;
+import eu.ddmore.libpharmml.dom.commontypes.MatrixSelector;
 import eu.ddmore.libpharmml.dom.commontypes.PharmMLElement;
 import eu.ddmore.libpharmml.dom.commontypes.PharmMLRootType;
+import eu.ddmore.libpharmml.dom.commontypes.Product;
+import eu.ddmore.libpharmml.dom.commontypes.RealValue;
 import eu.ddmore.libpharmml.dom.commontypes.Rhs;
+import eu.ddmore.libpharmml.dom.commontypes.Scalar;
+import eu.ddmore.libpharmml.dom.commontypes.Sequence;
 import eu.ddmore.libpharmml.dom.commontypes.StringValue;
+import eu.ddmore.libpharmml.dom.commontypes.Sum;
 import eu.ddmore.libpharmml.dom.commontypes.Symbol;
 import eu.ddmore.libpharmml.dom.commontypes.SymbolRef;
 import eu.ddmore.libpharmml.dom.commontypes.TrueBoolean;
@@ -115,18 +192,45 @@ import eu.ddmore.libpharmml.dom.commontypes.VariableDefinition;
 import eu.ddmore.libpharmml.dom.commontypes.Vector;
 import eu.ddmore.libpharmml.dom.commontypes.VectorElements;
 import eu.ddmore.libpharmml.dom.commontypes.VectorValue;
+import eu.ddmore.libpharmml.dom.dataset.ColumnDefinition;
+import eu.ddmore.libpharmml.dom.maths.Binop;
+import eu.ddmore.libpharmml.dom.maths.Condition;
+import eu.ddmore.libpharmml.dom.maths.Constant;
+import eu.ddmore.libpharmml.dom.maths.ExpressionValue;
+import eu.ddmore.libpharmml.dom.maths.FunctionCallType;
+import eu.ddmore.libpharmml.dom.maths.LogicBinOp;
+import eu.ddmore.libpharmml.dom.maths.LogicUniOp;
+import eu.ddmore.libpharmml.dom.maths.MatrixUniOp;
+import eu.ddmore.libpharmml.dom.maths.Piece;
+import eu.ddmore.libpharmml.dom.maths.Piecewise;
+import eu.ddmore.libpharmml.dom.maths.Uniop;
 import eu.ddmore.libpharmml.dom.modeldefn.CategoricalCovariate;
+import eu.ddmore.libpharmml.dom.modeldefn.CategoricalRelation;
 import eu.ddmore.libpharmml.dom.modeldefn.Category;
 import eu.ddmore.libpharmml.dom.modeldefn.CommonParameter;
+import eu.ddmore.libpharmml.dom.modeldefn.ContinuousCovariate;
 import eu.ddmore.libpharmml.dom.modeldefn.CovariateDefinition;
+import eu.ddmore.libpharmml.dom.modeldefn.CovariateTransformation;
+import eu.ddmore.libpharmml.dom.modeldefn.Distribution;
+import eu.ddmore.libpharmml.dom.modeldefn.GeneralObsError;
+import eu.ddmore.libpharmml.dom.modeldefn.IndividualParameter;
+import eu.ddmore.libpharmml.dom.modeldefn.ObservationError;
+import eu.ddmore.libpharmml.dom.modeldefn.ParameterRandomVariable;
 import eu.ddmore.libpharmml.dom.modeldefn.PopulationParameter;
+import eu.ddmore.libpharmml.dom.modeldefn.Probability;
+import eu.ddmore.libpharmml.dom.modeldefn.TransformedCovariate;
+import eu.ddmore.libpharmml.dom.modeldefn.UncertML;
+import eu.ddmore.libpharmml.dom.modeldefn.VariabilityLevelDefinition;
 import eu.ddmore.libpharmml.dom.modellingsteps.Algorithm;
 import eu.ddmore.libpharmml.dom.modellingsteps.EstimationOpType;
 import eu.ddmore.libpharmml.dom.modellingsteps.EstimationOperation;
 import eu.ddmore.libpharmml.dom.modellingsteps.OperationProperty;
 import eu.ddmore.libpharmml.dom.modellingsteps.ParameterEstimate;
+import eu.ddmore.libpharmml.dom.probonto.ProbOnto;
+import eu.ddmore.libpharmml.dom.uncertml.AbstractContinuousUnivariateDistributionType;
+import eu.ddmore.libpharmml.dom.uncertml.VarRefType;
 
-public class Parser extends crx.converters.r.Parser {
+public class Parser extends BaseParser {
 	private static class BetaCovariate {
 		public CovariateDefinition cov = null;
 		public List<VectorValue> values = null;
@@ -176,12 +280,196 @@ public class Parser extends crx.converters.r.Parser {
 	}
 	
 	private static final String CURRENT_WORKING_DIR = "CURRENT_WORKING_DIR";
+	
 	private static final String PFIM_PROGRAM_DIR = "PFIM_PROGRAM_DIR";
+	
 	private static final String pfimProjectFilename = "PFIM";
+	
 	private static String pfimStdinFilename = "stdin";
 	private static String pfimStdoutFilename = "Stdout";
 	private static final String PREFERRED_SEPERATOR = "/";
+	private static void addElement(Vector dst, VectorElements elements, Object element, Accessor a) {
+		if (isInteger(element)) {
+			Integer v = (Integer) element;
+			elements.getListOfElements().add(new IntValue(v));
+		} else if (isDouble(element)) {
+			Double v = (Double) element;
+			elements.getListOfElements().add(new RealValue(v));
+		} else if (isString_(element)) {
+			String v = (String) element;
+			elements.getListOfElements().add(new StringValue(v));
+		} else if (isMatrixCell(element)) {
+			MatrixCell cell = (MatrixCell) element;
+			elements.getListOfElements().add((VectorValue) cell.getValue());
+		} else if (isScalarInterface(element)) {
+			Scalar s = (Scalar) element;
+			elements.getListOfElements().add(s);
+		} else if (isSequence(element)) {
+			Sequence old_seq = (Sequence) element;
+			Sequence new_seq = elements.createSequence();
+			
+			new_seq.setBegin(old_seq.getBegin());
+			new_seq.setEnd(old_seq.getEnd());
+			new_seq.setRepetitions(old_seq.getRepetitions());
+			new_seq.setStepSize(old_seq.getStepSize());
+		} 
+		else if (isRhs(element)) elements.getListOfElements().add((Rhs) element);
+		else if (isRootType(element)) elements.getListOfElements().add(symbolRef((PharmMLRootType) element, a));
+		else 
+			throw new UnsupportedOperationException("Unsupported vector element (src='" + element + "')");
+	}
+	private static void assign(Rhs rhs, Object o, Accessor a) {
+		if (rhs == null || o == null) return;
+		
+		if (isConstant(o)) rhs.setConstant((Constant) o);
+		else if (isLocalVariable(o)) rhs.setSymbRef(symbolRef((VariableDefinition) o, a));
+		else if (isPopulationParameter(o)) rhs.setSymbRef(symbolRef((PopulationParameter) o, a));
+		else if (isBinaryOperation(o)) rhs.setBinop((Binop) o); 
+		else if (isDerivative(o)) rhs.setSymbRef(symbolRef((DerivativeVariable) o, a));
+		else if (isString_(o)) rhs.setScalar(new StringValue((String) o));
+		else if (isBoolean(o)) {
+			Boolean b = (Boolean) o;
+			if (b.booleanValue()) rhs.setScalar(new TrueBoolean());
+			else rhs.setScalar(new FalseBoolean());
+		}
+		else if (isInteger(o)) rhs.setScalar(new IntValue((Integer) o));
+		else if (isBigInteger(o)) {
+			BigInteger v = (BigInteger) o;
+			rhs.setScalar(new IntValue(v.intValue()));
+		}
+		else if (isDouble(o)) rhs.setScalar(new RealValue((Double) o));
+		else if (isUnaryOperation(o)) rhs.setUniop((Uniop) o);
+		else if (isIndependentVariable(o)) rhs.setSymbRef(symbolRef((IndependentVariable) o, a));
+		else if (isIndividualParameter(o)) rhs.setSymbRef(symbolRef((IndividualParameter) o, a));
+		else if (isFunctionCall(o)) rhs.setFunctionCall((FunctionCallType) o);
+		else if (isScalarInterface(o)) rhs.setScalar((Scalar) o);
+		else if (isPiecewise(o)) rhs.setPiecewise((Piecewise) o);
+		else if (isSymbolReference(o)) rhs.setSymbRef((SymbolRef) o);
+		else if (isDelay(o)) rhs.setDelay((Delay) o);
+		else if (isSum(o)) rhs.setSum((Sum) o);
+		else if (isJAXBElement(o)) {
+			JAXBElement<?> element = (JAXBElement<?>) o;
+			assign(rhs, element.getValue(), a);
+		} else if (isMatrix(o)) rhs.setMatrix((Matrix) o);
+		else if (isProduct(o)) rhs.setProduct((Product) o);
+		else if (isSequence(o)) rhs.setSequence((Sequence) o);
+		else if (isVector(o)) rhs.setVector((Vector) o);
+		else if (isInterval(o)) rhs.setInterval((Interval) o);
+		else if (isInterpolation(o)) rhs.setInterpolation((Interpolation) o);
+		else if (isProbability(o)) rhs.setProbability((Probability) o);
+		else if (isMatrixUnaryOperation(o)) rhs.setMatrixUniop((MatrixUniOp) o);
+		else if (isMatrixSelector(o)) rhs.setMatrixSelector((MatrixSelector) o);
+		else if (isVectorSelector(o)) rhs.setMatrixSelector((MatrixSelector) o);
+		else if (isRhs(o)) {
+			Rhs assign = (Rhs) o;
+			assign(rhs, assign.getContent(), a);
+		}
+		else
+			throw new UnsupportedOperationException("Unsupported Expression Term (value='" + o + "')");
+	}
+	private static Object getDist(Distribution dist) {
+		if (dist == null) return null;
+		
+		ProbOnto probOnto = dist.getProbOnto();
+		if (probOnto != null) return probOnto;
+		
+		UncertML uncert = dist.getUncertML();
+		if (uncert == null) return null;
+		
+		JAXBElement<? extends AbstractContinuousUnivariateDistributionType> tag = uncert.getAbstractContinuousUnivariateDistribution();
+		AbstractContinuousUnivariateDistributionType d = null;
+		if (tag != null) d = tag.getValue();
+		
+		return d;
+	}
 	
+	private static Object getDist(ParameterRandomVariable rv) { return getDist(rv.getDistribution()); }
+	private static Rhs rhs(Object o, Accessor a) {
+		if (o == null) throw new NullPointerException("Expression Class NULL");
+		Rhs rhs = new Rhs();
+		assign(rhs, o, a);
+		return rhs;
+	}
+	private static SymbolRef symbolRef(PharmMLRootType o, Accessor a) {
+		String symbId = null;
+		
+		boolean addScope = false;
+		
+		if (isSymbolReference(o)) {
+			return (SymbolRef) o;
+		} else if (isCommonParameter(o)) { 
+			symbId = ((CommonParameter) o).getSymbId();
+			addScope = true;
+		} else if (isLocalVariable(o)) {
+			symbId = ((VariableDefinition) o).getSymbId();
+			addScope = true;
+		} else if (isDerivative(o)) { 
+			symbId = ((DerivativeVariable) o).getSymbId();
+			addScope = true;
+		} else if (isIndividualParameter(o)) { 
+			symbId = ((IndividualParameter) o).getSymbId();
+			addScope = true;
+		} else if (isRandomVariable(o)) {
+			symbId = ((ParameterRandomVariable) o).getSymbId();
+			addScope = true;
+		} else if (isIndependentVariable(o)) {
+			symbId = ((IndependentVariable) o).getSymbId();
+		} else if (isCovariate(o)) {
+			symbId = ((CovariateDefinition) o).getSymbId();
+			addScope = true;
+		} else if (isFunctionParameter(o)) {
+			symbId = ((FunctionParameter) o).getSymbId();
+		} else if (isFunction(o)) {
+			symbId = ((FunctionDefinition) o).getSymbId();
+		} else if (isObservationError(o)) {
+			symbId = ((ObservationError) o).getSymbId();
+			addScope = true;
+		} else if (isColumnDefinition(o)) {
+			symbId = ((ColumnDefinition) o).getColumnId();
+			addScope = false;	
+		} else if (isContinuousCovariate(o)) {
+			ContinuousCovariate ccov = (ContinuousCovariate) o;
+			
+			// INFO: Assuming a unary application for this release. 
+			for (CovariateTransformation trans : ccov.getListOfTransformation()) {
+				if (trans == null) continue;
+				
+				TransformedCovariate tc = trans.getTransformedCovariate();
+				if (tc == null) continue;
+				
+				symbId = tc.getSymbId();
+				addScope = true;
+				break;
+			}
+		} else if (isVariabilityLevelDefinition(o)) {
+			VariabilityLevelDefinition level = (VariabilityLevelDefinition) o;
+			symbId = level.getSymbId();
+			addScope = true;
+		}
+		else if (isGeneralError(o)) {
+			GeneralObsError goe = (GeneralObsError) o;
+			symbId = goe.getSymbId();
+			addScope = true;
+		}
+		else 
+			throw new UnsupportedOperationException("Unsupported Symbol reference (src='" + o + "')");
+		
+		if (symbId == null) throw new NullPointerException("SymbId is NULL.");
+		
+		SymbolRef ref = new SymbolRef();
+		ref.setSymbIdRef(symbId);
+		
+		if (addScope) {
+			String blkId = a.getBlockId(o);
+			if (blkId == null) {
+				throw new NullPointerException("BlkId is not known (symbId='" + symbId + "', class='" + Utils.getClassName(o) + "')");
+			}
+			
+			ref.setBlkIdRef(blkId);
+		}
+		
+		return ref;
+	}
 	private OptimisationAlgorithm algo = OptimisationAlgorithm.UNSPECIFIED;
 	private Double alpha = 0.01;
 	private Double atol = 1E-08;
@@ -205,7 +493,9 @@ public class Parser extends crx.converters.r.Parser {
 	private String hmax = "Inf";
 	private boolean identicalInitialConditionsInEachDesign = false;
 	private Boolean identicalTimes = false;
+	private String indiv_param_symbol = "IPARAMS";
 	private PharmMLElement initialConditionTime = new IntValue(0);
+	private String leftArrayBracket = null;
 	private Vector lowerA = null, lowerB = null;
 	private Vector lowerSamplingTimes = null;
 	private Integer maximumIterations = 5000;
@@ -220,42 +510,65 @@ public class Parser extends crx.converters.r.Parser {
 	private Matrix omega = null;
 	private Boolean optimisationOfProportionsOfSubjects = false;
 	private String outputFIMFilename = "";
+	private String param_model_symbol  = null;
 	private List<String> pfimProjectTemplate = new ArrayList<String>();
 	private String previousFIM = "";
 	private Boolean printIterations = true;
 	private String programDirectory = ".";
+	private Properties props = null;
 	private List<Object> protA = new ArrayList<Object>();
 	private Double relativeConvergenceTolerance = 1E-6;
+	private String rightArrayBracket = null;
 	private Double rtol = 1E-08;
-	private Double sigInterA = 0.0;
+	private Double sigInterA = 0.0; 
 	private Double sigSlopeA = 0.0;
 	private Double simplexParameter = 0.0;
 	private Boolean standardGraphic = true;
+	private String state_vector_symbol = null;
 	private TreeMaker tm = null;
 	private Integer Trand = -1;
 	private Vector upperA = null, upperB = null;
 	private Vector upperSamplingTimes = null;
-	private boolean usingCovariateModel = false; 
+	private boolean useDiagonalMatrixViaList = false;
+	private boolean usingCovariateModel = false;
 	private boolean usingCovariateOccassionModel = false;
 	private Boolean usingIdenticalDose = false;
 	private boolean usingSubjects = false;
+	private boolean validateSymbolReferences = false;
 	private boolean writingAnalyticalModel = false;
 	private boolean writingModelFunctionScopedVariable = false;
 	private boolean writtenSTDIN = false;
+	
 	private boolean wrotePFIM_R = false;
+	
 	private Vector xAxesNames = null;
+	
 	private Vector yAxesNames = null;
+	
 	private Vector yAxesRange = null;
 	
 	public Parser() throws IOException {
 		super();
 		loadPFIMTemplate();
-		setUseCompiledStructuralModel(false);
+		
+		props = new Properties();
+		props.load(getClass().getResourceAsStream("Parser.properties"));
+		
+		comment_char = "#";
+		script_file_suffix = "R";
+		objective_dataset_file_suffix = "csv";
+		output_file_suffix = "csv";
+		solver = "ode";
+		leftArrayBracket = "[";
+		rightArrayBracket = "]";
 		
 		// PFIM Specific symbols and settings.
 		param_model_symbol = "p";
 		state_vector_symbol = "X";
 		programDirectory = props.getProperty("pfimProgramDirectory");
+		
+		setReferenceClass(getClass());
+		init();
 		
 		// Read directory path via the shell, ignoring the relative path
 		// specified in the config file.
@@ -263,8 +576,19 @@ public class Parser extends crx.converters.r.Parser {
 		setDiagonalMatrixViaList(true);
 	}
 	
-	@Override
-	protected String doCategoricalCovariateRef(CategoricalCovariateRef cref) {
+	private String doArrayAccess(String variableName, Integer idx) {
+		String format = "%s%s%s%s";
+		
+		if (variableName == null || idx == null) throw new NullPointerException("Required array access data is NULL");
+		
+		return String.format(format, variableName, leftArrayBracket, idx, rightArrayBracket);
+	}
+	
+	private String doBigInteger(BigInteger i) {
+		return i.toString();
+	}
+	
+	private String doCategoricalCovariateRef(CategoricalCovariateRef cref) {
 		String name = cref.cov.getSymbId();
 		CategoricalCovariate cc = cref.cov.getCategorical();
 		
@@ -282,8 +606,56 @@ public class Parser extends crx.converters.r.Parser {
 		return String.format(format, name, categories); 
 	}
 	
-	@Override
-	protected String doCovariateParameterRef(CovariateParameterRef ref) {
+	private String doCategoricalRelation(CategoricalRelation cr) { return cr.getCatId(); }
+	
+	private String doCategoryProportions(CategoryProportions cp) {
+		String name = z.get(cp.getCovariate());
+		
+		TreeMaker tm = lexer.getTreeMaker();
+		BinaryTree bt = tm.newInstance(cp.getProportions());
+		lexer.updateNestedTrees();
+		
+		String stmt = stripOuterBrackets(parse(cp, bt).trim());
+		String format = "%s=%s";
+		
+		return String.format(format, name, stmt);
+	}
+	
+	private String doCategoryRef_(CategoryRef_ cr) { return cr.getDataSymbol(); }
+	
+	/**
+	 * Return a symbol required by an assignment statement referencing an conditional dose event.
+	 * @return java.lang.String A variable or a direct value read from an external dara file.
+	 */
+	public String doConditionalDoseEventRef(ConditionalDoseEventRef ref) { return ref.getSymbIdRef(); }
+	
+	private String doConstant(Constant c) {
+		String symbol = unassigned_symbol;
+		
+		String op = c.getOp();
+		if (op.equalsIgnoreCase("notanumber")) symbol = "NaN";
+		else if (op.equalsIgnoreCase("pi")) symbol = "pi";
+		else if (op.equalsIgnoreCase("exponentiale")) symbol = "exp(1)";
+		else if (op.equalsIgnoreCase("infinity")) symbol = "Inf";
+	
+		return symbol;
+	}
+	
+	private String doCovariate(CovariateDefinition cov) {
+		String symbol = unassigned_symbol;
+	
+		if (cov.getCategorical() != null) {
+			throw new UnsupportedOperationException("CovariateDefinition::categorical not supported yet.");
+		} else if (cov.getContinuous() != null) {
+			ContinuousCovariate continuous = cov.getContinuous();
+			Object dist = getDist(continuous);
+			symbol = parse(dist, lexer.getStatement(dist)); 
+		}
+		
+		return symbol;
+	}
+	
+	private String doCovariateParameterRef(CovariateParameterRef ref) {
 		String cname = z.get(ref.getCovariate());
 		
 		List<String> vars = new ArrayList<String>(); 
@@ -305,6 +677,86 @@ public class Parser extends crx.converters.r.Parser {
 		return stmt.toString();
 	}
 	
+	private String doCovariateTransform(CovariateTransformation ct) { 
+		String symbol = unassigned_symbol;
+		TransformedCovariate v = ct.getTransformedCovariate();
+		if (v != null) symbol = z.get(v.getSymbId());
+		return symbol; 
+	}
+	
+	private String doDerivative(DerivativeVariable dv) {
+		return z.get(dv);
+	}
+	
+	private String doDiagonalMatrixFromList(Matrix M) { 
+		List<Object> list = new ArrayList<Object>();
+		list.addAll(M.getListOfMatrixElements());
+	
+		TreeMaker tm = lexer.getTreeMaker();
+		BinaryTree bt = tm.newInstance(vector(list, lexer.getAccessor()));
+		lexer.updateNestedTrees();
+		
+		String stmt = parse(M,bt).trim();
+		String format = "diag(%s)";
+		return String.format(format, stmt); 
+	}
+	
+	private String doElement(JAXBElement<?> element) {
+		String symbol = unassigned_symbol;
+		
+		Object value = element.getValue();
+		if (value != null) {
+			if (isBinaryOperation(value) || isUnaryOperation(value)) 
+				symbol = parseRawEquation(value);
+			else 
+				symbol = getSymbol(element.getValue());
+		}
+		
+		return symbol;
+	}
+	
+	private String doFalse() { return "FALSE"; }
+	
+	private String doFixedEffectCategoryRef(FixedEffectCategoryRef ref) { return unassigned_symbol; }
+	
+	private String doFixedParameter(FixedParameter fp) { return z.get(fp.pe.getSymbRef()); }
+	
+	private String doIndependentVariable(IndependentVariable v) {
+		return z.get(v.getSymbId());
+	}
+	
+	private String doIndividualParameter(IndividualParameter iv) { return z.get(iv); }
+	
+	private String doIndividualParameterAssignment(IndividualParameterAssignment ipa) {
+		return z.get(ipa.parameter);
+	}
+	
+	private String doInt(IntValue i) {
+		return i.getValue().toString();
+	}
+	
+	private String doLocalVariable(VariableDefinition v) {
+		return z.get(v.getSymbId());
+	}
+	
+	private String doLogicalBinaryOperator(LogicBinOp l_b_op) {
+		return getLogicalOperator(l_b_op.getOp());
+	}
+	
+	private String doLogicalUnaryOperator(LogicUniOp u_b_op) {
+		return getLogicalOperator(u_b_op.getOp());
+	}
+	
+	private String doParameter(PopulationParameter p) {
+		if (lexer.isModelParameter(p.getSymbId())) {
+			Integer idx = lexer.getModelParameterIndex(p.getSymbId());
+			String format = "%s%s%s%s";
+			return String.format(format, param_model_symbol, leftArrayBracket, idx, rightArrayBracket);
+		} 
+		else 
+			return z.get(p);
+	}
+	
 	private void doPFIMLocalAssignment(PrintWriter fout, Symbol v) {
 		if (fout  == null || v == null) return;
 		
@@ -315,8 +767,169 @@ public class Parser extends crx.converters.r.Parser {
 		fout.write(String.format(format, z.get(v.getSymbId()), symbol));
 	}
 	
-	@Override
-	protected String doSymbolRef(SymbolRef s) {
+	public String doPiecewise(Piecewise pw) {
+		String symbol = unassigned_symbol;
+		 
+		List<Piece> pieces = pw.getListOfPiece();
+		Piece else_block = null;
+		BinaryTree [] assignment_trees = new BinaryTree[pieces.size()]; 
+		BinaryTree [] conditional_trees = new BinaryTree[pieces.size()];
+		String [] conditional_stmts = new String [pieces.size()];
+		String [] assignment_stmts = new String [pieces.size()];
+		
+		TreeMaker tm = lexer.getTreeMaker();
+		Accessor a = lexer.getAccessor();
+		
+		int assignment_count = 0, else_index = -1;
+		for(int i = 0; i < pieces.size(); i++) {
+			Piece piece = pieces.get(i);
+			if (piece != null) {
+				// Logical blocks
+				Condition cond = piece.getCondition();
+				if (cond != null) {
+					conditional_trees[i] = tm.newInstance(piece.getCondition());
+					if (cond.getOtherwise() != null) {
+						else_block = piece;
+						else_index = i;
+					}
+				}
+					
+				// Assignment block
+				BinaryTree assignment_tree = null;
+				ExpressionValue expr = piece.getValue();
+				if (isBinaryOperation(expr)) { 
+					assignment_tree = tm.newInstance(rhs((Binop) expr, a));
+					assignment_count++;
+				} else if (isConstant(expr)) {
+					assignment_tree = tm.newInstance(expr);
+					assignment_count++;
+				} else if (isFunctionCall(expr)) {
+					assignment_tree = tm.newInstance(rhs((FunctionCallType) expr, a));
+					assignment_count++;
+				} else if (isJAXBElement(expr)) {
+					assignment_tree = tm.newInstance(rhs((JAXBElement<?>) expr, a));
+					assignment_count++;
+				} else if (isSymbolReference(expr)) {
+					assignment_tree = tm.newInstance(expr);
+					assignment_count++;
+				} else if (isScalarInterface(expr)) {
+					assignment_tree = tm.newInstance(expr);
+					assignment_count++;
+				} else 
+					throw new IllegalStateException("Piecewise assignment failed (expr='" + expr + "')");
+				
+				if (assignment_tree != null) assignment_trees[i] = assignment_tree;
+			}
+		}
+			
+		if (assignment_count == 0) throw new IllegalStateException("A piecewise block has no assignment statements.");
+			
+		for (int i = 0; i < pieces.size(); i++) {
+			Piece piece = pieces.get(i);
+						
+			if (conditional_trees[i] != null && assignment_trees[i] != null) {			
+				// Logical condition
+				if (!piece.equals(else_block)) conditional_stmts[i] = parse(piece, conditional_trees[i]);
+		
+				// Assignment block
+				assignment_stmts[i] = parse(new Object(), assignment_trees[i]);
+			}
+		}
+			
+		int block_assignment = 0;
+		StringBuilder block = new StringBuilder(" NaN;\n");
+		for (int i = 0; i < pieces.size(); i++) {
+			Piece piece = pieces.get(i);
+			if (piece == null) continue;
+			else if (piece.equals(else_block)) continue;
+			
+			if (!(conditional_stmts[i] != null && assignment_stmts[i] != null)) continue;	
+				String operator = "if", format = "%s (%s) {\n %s <- %s \n";
+				if (block_assignment > 0) {
+				operator = "} else if ";
+				format = " %s (%s) {\n %s <- %s \n";
+			}
+				
+			block.append(String.format(format, operator, conditional_stmts[i], field_tag, assignment_stmts[i]));
+			block_assignment++;
+		}
+		
+		if (else_block != null && else_index >= 0) {
+			block.append("} else {\n");
+			String format = " %s <- %s\n";
+			block.append(String.format(format, field_tag, assignment_stmts[else_index]));
+		}
+		block.append("}");
+		if (assignment_count == 0) throw new IllegalStateException("Piecewise statement assigned no conditional blocks.");
+		symbol = block.toString();
+			
+		return symbol;
+	}
+	
+	private String doRandomVariable(ParameterRandomVariable rv) {
+		return getSymbol(getDist(rv));
+	}
+	
+	private String doReal(RealValue r) {
+		return Double.toString(r.getValue());
+	}
+	
+	private String doRhs(Rhs eq) {
+		TreeMaker tm = lexer.getTreeMaker();
+		return parse(new Object(), tm.newInstance(eq));
+	}
+	
+	private String doSequence(Sequence o) {
+		String symbol = unassigned_symbol;
+		
+		Sequence seq = (Sequence) o;
+		Rhs begin = seq.getBegin();
+		Rhs end = seq.getEnd();
+		Rhs repetitions = seq.getRepetitions();
+		Rhs stepSize = seq.getStepSize();
+		
+		BinaryTree btBegin = null, btEnd = null, btRepetitions = null, btStepSize = null;
+		if (begin == null) throw new IllegalStateException("The required Sequence.begin field is not assigned.");
+		
+		if (begin != null) btBegin = lexer.getStatement(begin);
+		if (end != null) btEnd = lexer.getStatement(end);
+		if (repetitions != null) btRepetitions = lexer.getStatement(repetitions);
+		if (stepSize != null) btStepSize = lexer.getStatement(stepSize);
+		
+		String strBegin = null, strEnd = null, strRepetitions = null, strStepSize = null;
+		
+		if (btBegin != null) strBegin = parse(seq, btBegin);
+		if (btEnd != null) strEnd = parse(seq, btEnd);	
+		if (btRepetitions != null) strRepetitions = parse(seq, btRepetitions);
+		if (btStepSize != null)	strStepSize = parse(seq, btStepSize);
+			
+		// Default value in case the conditional logic fails or the PharmML spec changes.
+		symbol = "c(0 0)";
+		if (strBegin != null && strEnd != null && strStepSize != null) {
+			String format = "seq(%s, %s, by=%s)";
+			symbol = String.format(format, strBegin, strEnd, strStepSize);
+		} else if (strBegin != null && strEnd != null && strRepetitions != null) {
+			String format = "seq(%s,%s,length=%s)";
+			symbol = String.format(format, strBegin, strEnd, strRepetitions);
+		} else if (strBegin != null && strStepSize != null && strRepetitions != null) {
+			String format = "seq(%s, (%s*%s), by=%s)";
+			symbol = String.format(format, strBegin, strStepSize, strRepetitions, strStepSize);
+		} else if (strBegin != null && strEnd != null) {
+			String format = "%s:%s";
+			symbol = String.format(format, strBegin, strEnd);
+		}
+		
+		return symbol;
+	}
+	
+	private String doString(String v) { return v; }
+	
+	private String doStringValue(StringValue sv) {
+		String format = "'%s'";
+		return String.format(format, sv.getValue());
+	}
+	
+	private String doSymbolRef(SymbolRef s) {
 		// X symbol reserved symbol as used by PFIM.
 		if (writingAnalyticalModel) {
 			Accessor a = lexer.getAccessor();
@@ -325,7 +938,93 @@ public class Parser extends crx.converters.r.Parser {
 		}
 		
 		if (writingModelFunctionScopedVariable) return z.get(s.getSymbIdRef());
-		else return super.doSymbolRef(s);
+		else return doSymbolRef_(s);
+	}
+	
+	private String doSymbolRef_(SymbolRef s) {
+		String symbol = s.getSymbIdRef();
+		
+		Accessor a = lexer.getAccessor();
+		PharmMLRootType element = a.fetchElement(s);
+		
+		// Do not bother validating if a writing a function as parameters scoped to the local function.
+		if (validateSymbolReferences) {
+			if (element == null) 
+				throw new NullPointerException("Unable to resolve model symbol (symbIdRef=('" + s.getSymbIdRef() + "').");
+		}
+		
+		if (element instanceof ConditionalDoseEventRef) symbol = getSymbol(element);
+		else if (lexer.isModelParameter(symbol)) 
+			symbol = doArrayAccess(param_model_symbol, lexer.getModelParameterIndex(symbol)); 
+		else if (lexer.isStateVariable(symbol) || isDerivative(element)) 
+			symbol = doArrayAccess(state_vector_symbol, lexer.getStateVariableIndex(symbol));
+		else if (lexer.isIndividualParameter_(symbol)) 
+			symbol = doArrayAccess(indiv_param_symbol, lexer.getIndividualParameterIndex(symbol));
+		else if (element instanceof CategoryRef_) 
+			symbol = doCategoryRef_((CategoryRef_) element);
+		else {
+			if (lexer.isRemoveIllegalCharacters()) {
+				ModifiedSymbol result = z.removeIllegalCharacters(s, symbol);
+				if (result.isModified()) symbol = result.modified_value;
+			}
+			
+			if (lexer.isFilterReservedWords()) {
+				if (z.isReservedWord(symbol)) {
+					symbol = z.replacement4ReservedWord(s.getSymbIdRef());
+					if (symbol == null) 
+						throw new NullPointerException("Replacement symbol for reserved word (symbIdRef=('" + s.getSymbIdRef() + "') undefined.");
+					
+					ModifiedSymbol result = new ModifiedSymbol(element, s.getSymbIdRef(), symbol);
+					if (result.isModified()) z.add(result);
+				}
+			}
+		}
+				
+		return symbol;
+	}
+	
+	private String doTrue() { return "TRUE"; }
+	
+	private String doVarRef(VarRefType ref) {
+		String symbol = unassigned_symbol;
+		
+		PharmMLRootType element = lexer.getAccessor().fetchElement(ref);
+				
+    	if (element == null) throw new NullPointerException("Variable reference not found (" + ref.getVarId() + ")");
+    	symbol = getSymbol(element);
+		
+		return symbol;
+	}
+	
+	private String doVector(Vector v) {
+		String symbol = unassigned_symbol;
+		
+		ArrayList<String> values = new ArrayList<String>();
+		
+		VectorElements elements = v.getVectorElements();
+		if (elements == null) throw new NullPointerException("Vector elements are NULL.");
+		
+		for (VectorValue value : elements.getListOfElements()) {
+			if (value == null) continue;
+			if (lexer.hasStatement(value)) {
+				String stmt = parse(v, lexer.getStatement(value));
+				stmt = stripOuterBrackets(stmt);
+				values.add(stmt);
+			}
+		}
+		
+		StringBuilder st = new StringBuilder();
+		st.append("c(");
+		int count = 0;
+		for (String value : values) {
+			if (count > 0) st.append(",");
+			st.append(value.trim());
+			count++;
+		}
+		st.append(")");
+		
+		symbol = st.toString();
+		return stripOuterBrackets(symbol);
 	}
 	
 	private String getBetaCovariateDecl(BetaCovariate bcov) {
@@ -349,8 +1048,18 @@ public class Parser extends crx.converters.r.Parser {
 		return String.format(format, z.get(bcov.cov), stmt);
 	}
 	
+	private Object getDist(ContinuousCovariate ccov) {
+		if (ccov == null) return null;
+		return getDist(ccov.getDistribution());
+	}
+	
 	@Override
-	protected String getModelFunctionName(StructuralBlock sb) { return "model"; }
+	public String getModelFunctionFilename(String output_dir, StructuralBlock sb) {
+		String format = "%s%s%s.%s";
+		return String.format(format, output_dir, File.separator, getModelFunctionName(sb), script_file_suffix);
+	}
+	
+	private String getModelFunctionName(StructuralBlock sb) { return "model"; }
 	
 	private String getOccassionCategories(String name, Vector values) {
 		if (name == null || values == null) return null;
@@ -374,6 +1083,79 @@ public class Parser extends crx.converters.r.Parser {
 	private String getStdinFilepath() {
 		String cwd = lexer.getOutputDirectory();
 		return cwd + PREFERRED_SEPERATOR + pfimStdinFilename + "." + script_file_suffix;
+	}
+	
+	@Override
+	public String getSymbol(Object o) {
+		String symbol = unassigned_symbol;
+	  
+		if (isSymbolReference(o)) symbol = doSymbolRef((SymbolRef) o); 
+		else if (isDerivative(o)) symbol = doDerivative((DerivativeVariable) o);
+		else if (isPopulationParameter(o)) symbol = doParameter((PopulationParameter) o);
+		else if (isLocalVariable(o)) symbol = doLocalVariable((VariableDefinition) o);
+		else if (isString_(o))  symbol = doString((String) o);
+		else if (isReal(o)) symbol = doReal((RealValue) o);
+		else if (isFalse(o)) symbol = doFalse();
+		else if (isTrue(o)) symbol = doTrue();
+		else if (isString(o)) symbol = doStringValue((StringValue) o);
+		else if (isInt(o)) symbol = doInt((IntValue) o);
+		else if (isConstant(o)) symbol = doConstant((Constant) o);
+		else if (isIndependentVariable(o)) symbol = doIndependentVariable((IndependentVariable) o);	
+		else if (isSequence(o)) symbol = doSequence((Sequence) o); 
+		else if (isVector(o)) symbol = doVector((Vector) o);
+		else if (isPiecewise(o)) symbol =  doPiecewise((Piecewise) o);
+		else if (isLogicalBinaryOperation(o)) symbol = doLogicalBinaryOperator((LogicBinOp) o);
+	    else if (isLogicalUnaryOperation(o)) symbol = doLogicalUnaryOperator((LogicUniOp) o);
+	    else if (isJAXBElement(o)) symbol = doElement((JAXBElement<?>) o);	
+	    else if (isVariableReference(o)) symbol = doVarRef((VarRefType) o);
+	    else if (isRandomVariable(o)) symbol = doRandomVariable((ParameterRandomVariable) o);
+	    else if (o instanceof IndividualParameterAssignment) symbol = doIndividualParameterAssignment((IndividualParameterAssignment) o);
+	    else if (isCovariate(o)) symbol = doCovariate((CovariateDefinition) o);	
+	    else if (isBigInteger(o)) symbol = doBigInteger((BigInteger) o);
+	    else if (o instanceof FixedParameter) symbol = doFixedParameter((FixedParameter) o);
+	    else if (isRhs(o)) symbol = doRhs((Rhs) o);
+	    else if (o instanceof CategoryRef_) symbol = doCategoryRef_((CategoryRef_) o);
+	    else if (isIndividualParameter(o)) symbol = doIndividualParameter((IndividualParameter) o);
+	    else if (isCovariateTransform(o)) symbol = doCovariateTransform((CovariateTransformation) o);
+	    else if (isCategoricalRelation(o)) symbol = doCategoricalRelation((CategoricalRelation) o);
+	    else if (o instanceof FixedEffectCategoryRef) symbol = doFixedEffectCategoryRef((FixedEffectCategoryRef) o); 
+	    else if (o instanceof CategoryProportions) symbol = doCategoryProportions((CategoryProportions) o);
+	    else if (o instanceof CovariateParameterRef) symbol = doCovariateParameterRef((CovariateParameterRef) o);
+	    else if (o instanceof CategoricalCovariateRef) symbol = doCategoricalCovariateRef((CategoricalCovariateRef) o);
+	    else if (o instanceof ConditionalDoseEventRef) symbol = doConditionalDoseEventRef((ConditionalDoseEventRef) o);
+	    else 
+	    {
+	    	String format = "WARNING: Unknown symbol, %s\n";
+			String value = "null";
+			if (o != null) value = getClassName(o);
+			String msg = String.format(format, value);
+			ConversionDetail detail = new ConversionDetail_();
+			detail.setSeverity(ConversionDetail.Severity.WARNING);
+			detail.addInfo("warning", msg);
+	    	
+			System.err.println(msg); 
+		}
+		
+		return symbol;
+	}
+	
+	@Override
+	public void initialise() {
+		validateSymbolReferences = true;
+		
+		lexer.setRemoveIllegalCharacters(true);
+		z.setReplacementCharacter('_');
+		z.setIllegalCharacters(new char [] {'~', '@', '+', '*', '-', '/', '$', '!', '.', '(', ')', '[', ']', ',', '#', '%', "\n".charAt(0), " ".charAt(0)});
+		
+		lexer.setFilterReservedWords(true);
+		try {
+			z.loadReservedWords();
+		} catch (Exception e) {
+			e.printStackTrace(System.err);
+			System.err.println("WARNING: Failed to read reserved word map for SymbolReader.");
+		}
+		
+		lexer.setSaveRenamedSymbolList(true);
 	}
 	
 	private void loadPFIMTemplate() {
@@ -406,6 +1188,34 @@ public class Parser extends crx.converters.r.Parser {
 		
 		algo = OptimisationAlgorithm.fromValue(definition);
 		if (algo.equals(SIMPLEX)) readSimplexOptions(op);
+	}
+	
+	/**
+	 * Read a boolean value from an operation property.
+	 * @param prop Operation Property
+	 * @return Boolean
+	 */
+	private Boolean readBoolean(OperationProperty prop) {
+		if (prop == null) return false;
+		
+		TreeMaker tm = lexer.getTreeMaker();
+		BinaryTree bt = tm.newInstance(prop.getAssign());
+		String value = parse(prop, bt).trim();
+		return Boolean.valueOf(value);
+	}
+	
+	/**
+	 * Read a double value from an operation property.
+	 * @param prop Operation Property
+	 * @return Double
+	 */
+	private Double readDouble(OperationProperty prop) {
+		if (prop == null) return 0.0;
+		
+		TreeMaker tm = lexer.getTreeMaker();
+		BinaryTree bt = tm.newInstance(prop.getAssign());
+		String value = parse(prop, bt).trim();
+		return Double.valueOf(value);
 	}
 	
 	private void readEstimationOperations() {
@@ -512,6 +1322,20 @@ public class Parser extends crx.converters.r.Parser {
 		}
 	}
 	
+	/**
+	 * Read an integer value from an operation property.
+	 * @param prop Operation Property
+	 * @return Double
+	 */
+	private Integer readInt(OperationProperty prop) {
+		if (prop == null) return 0;
+		
+		TreeMaker tm = lexer.getTreeMaker();
+		BinaryTree bt = tm.newInstance(prop.getAssign());
+		String value = parse(prop, bt).trim();
+		return Integer.valueOf(value);
+	}
+	
 	private void readOperations() { if (lexer.hasEstimation()) readEstimationOperations(); }
 	
 	private void readPopulationEstimationSettings(EstimationOperation pop_est) {
@@ -536,6 +1360,66 @@ public class Parser extends crx.converters.r.Parser {
 			else if (name.equals(SAMPLING_TIME_UPPER_B.toString())) setUpperB(prop);
 			else if (name.equals(SIMPLEX_PARAMETER.toString())) setSimplexParameter(prop);		
 		}
+	}
+	
+	private String readString(OperationProperty prop, boolean stripQuotes) {
+		if (prop == null) return "";
+		
+		TreeMaker tm = lexer.getTreeMaker();
+		BinaryTree bt = tm.newInstance(prop.getAssign());
+		String value = parse(prop, bt).trim();
+		if (stripQuotes) value = stripSingleQuotes(value);
+		return value.trim();
+	}
+	
+	@Override
+	protected void rootLeafHandler(Object context, Node leaf, PrintWriter fout) {
+		if (leaf == null) throw new NullPointerException("Tree leaf is NULL.");
+
+		if (leaf.data != null) {
+			boolean inPiecewise = false;
+			if (isPiecewise(leaf.data)) inPiecewise = true;
+			
+			if (!isString_(leaf.data)) leaf.data = getSymbol(leaf.data);
+			
+			String current_value = "", current_symbol = "_FAKE_FAKE_FAKE_FAKE_";
+			if (isDerivative(context) || isPopulationParameter(context) || isLocalVariable(context)) {
+				String format = "%s <- %s; %s %s\n", description = "";
+				if (isRootType(context)) description = readDescription((PharmMLRootType) context);
+				current_symbol = getSymbol(context);
+				current_value = String.format(format, current_symbol, leaf.data, comment_char, description);
+			} else if (isInitialCondition(context) || isFunction(context) || isSequence(context) || isVector(context)) {
+				String format = "(%s) ";
+				current_value = String.format(format, (String) leaf.data);
+			} else if (isPiece(context)) { 
+				String format = "%s ";
+				current_value = String.format(format, (String) leaf.data);
+			} else if (isIndividualParameter(context)) { 
+				current_value = (String) leaf.data;
+			} else if (isRandomVariable(context)) {
+				ParameterRandomVariable rv = (ParameterRandomVariable) context;
+				String format = "%s <- %s;\n";
+				current_value = String.format(format, rv.getSymbId(), (String) leaf.data);
+			} else if (isCovariate(context)) { 
+				CovariateDefinition cov = (CovariateDefinition) context;
+				String format = "%s <- %s;\n";
+				current_value = String.format(format, cov.getSymbId(), (String) leaf.data);
+			} else if (isParameterEstimate(context)) 
+			{
+				current_value = (String) leaf.data;
+			} else {
+				String format = " %s ";
+				current_value = String.format(format, (String) leaf.data);
+			}
+			
+			if (current_value != null) {
+				if(inPiecewise) {
+					if (current_symbol != null) current_value = current_value.replaceAll(field_tag, current_symbol) + "\n";
+				}
+				fout.write(current_value);
+			}
+		} else
+			throw new IllegalStateException("Should be a statement string bound to the root.data element.");
 	}
 	
 	private void setAlpha(OperationProperty prop) { alpha = readDouble(prop); }
@@ -608,6 +1492,8 @@ public class Parser extends crx.converters.r.Parser {
 	}
 	
 	private void setDeltaTime(OperationProperty prop) { deltaTime = readDouble(prop); }
+	
+	private void setDiagonalMatrixViaList(boolean decision) { useDiagonalMatrixViaList = decision; }
 	
 	private void setDoseIdentical(OperationProperty prop) {
 		usingIdenticalDose = readBoolean(prop);
@@ -793,16 +1679,52 @@ public class Parser extends crx.converters.r.Parser {
 		if (isVector(content)) yAxesRange = (Vector) content;
 	}
 	
+	private String stripSingleQuotes(String stmt) {
+		if (stmt == null) return null;		
+		return stmt.replaceAll("\'", "");
+	}
+	
+	private Vector vector(List<Object> elements_, Accessor a) {
+		Vector vec = new Vector();
+		
+		VectorElements elements = vec.createVectorElements();
+		for (Object element : elements_) addElement(vec, elements, element, a);
+		
+		return vec;
+	}
+	
 	private void writeAlgorithmOption(PrintWriter fout) {
 		String format = "\nalgo.option<-\"%s\" %s Optimisation Algorithm\n";
 		fout.write(String.format(format, algo.toString(), comment_char));
+	}
+	
+	private void writeAllModelFunctions(File output_dir) throws IOException {
+		if (lexer.isDiscrete()) return; // Discrete Models do not require a model function script.
+		
+		List<StructuralBlock> sbs = lexer.getStructuralBlocks();
+		
+		for (StructuralBlock sb : sbs) {
+			if (sb == null) continue;
+			lexer.setCurrentStructuralBlock(sb);
+			
+			// Skip as need to add macro declarations in the main script bollocks.
+			if (!lexer.isTranslate() && sb.hasPKMacros()) continue;
+			
+			String output_filename = getModelFunctionFilename(output_dir.getAbsolutePath(), sb);
+			PrintWriter mout = new PrintWriter(output_filename);
+			
+			writeModelFunction(mout, sb);
+			
+			mout.close();
+			mout = null;
+		}
 	}
 	
 	private void writeAlpha(PrintWriter fout) {
 		String format = "\nalpha<-%s %s Type one error alpha\n";
 		fout.write(String.format(format, alpha, comment_char));
 	}
-	
+
 	private void writeAnalyticalFunctionPrototype(PrintWriter fout, StructuralBlock sb) {
 		if (fout == null || sb == null) return;
 		
@@ -923,7 +1845,7 @@ public class Parser extends crx.converters.r.Parser {
 	
 	@Override
 	public void writeCategoricalEstimationBlock(PrintWriter fout, File output_dir, EstimationStep est) throws IOException {
-		writeStdin();
+		writeSTDIN();
 	}
 	
 	private void writeComputeNNIEquivalence(PrintWriter fout) {
@@ -979,7 +1901,7 @@ public class Parser extends crx.converters.r.Parser {
 		for (CategoricalCovariateRef ccov : ccovs) {
 			if (ccov == null) continue;
 			if (i > 0) stmt.append(",");
-			stmt.append(parse(ccov, lexer.getStatement(ccov)));
+			//stmt.append(parse(ccov, lexer.getStatement(ccov))); // TODO: Res
 			i++;
 		}
 		
@@ -1098,8 +2020,10 @@ public class Parser extends crx.converters.r.Parser {
 		String format = "\ncovariate_occ.sequence<-list( %s )\n";
 		fout.write(String.format(format, outer_stmt));
 	}
-
+	
 	private void writeCovariateProportions(PrintWriter fout) {
+		// TODO: Debug this code
+		/*
 		if (cat_props.isEmpty()) return;
 		
 		List<String> decls = new ArrayList<String>();
@@ -1115,6 +2039,7 @@ public class Parser extends crx.converters.r.Parser {
 		
 		String format = "\ncovariate.proportions<-list(%s)\n";
 		fout.write(String.format(format, stmt));
+		*/
 	}
 	
 	private void writeCovariatesChangingWithOccassion(PrintWriter fout) {
@@ -1182,7 +2107,7 @@ public class Parser extends crx.converters.r.Parser {
 	
 	//@Override
 	public void writeEstimationBlock(PrintWriter fout, File output_dir, EstimationStep est) throws IOException {
-		writeStdin();
+		writeSTDIN();
 		
 		if (fout == null) return;
 		String format = "\n%s()\n";
@@ -1453,8 +2378,7 @@ public class Parser extends crx.converters.r.Parser {
 		fout.write(String.format(format, form));
 	}
 	
-	@Override
-	protected void writeModelFunction(PrintWriter fout, StructuralBlock sb) throws IOException {
+	private void writeModelFunction(PrintWriter fout, StructuralBlock sb) throws IOException {
 		if (fout == null) throw new NullPointerException();
 		
 		writeScriptHeader(fout, lexer.getModelFilename());
@@ -1551,6 +2475,8 @@ public class Parser extends crx.converters.r.Parser {
 	}
 	
 	private void writeParameterAssociated(PrintWriter fout) {
+		// TODO: Restore this block
+		/*
 		CovariateBlock cb = lexer.getCovariateBlock();
 		if (cb == null) return;
 		
@@ -1570,7 +2496,7 @@ public class Parser extends crx.converters.r.Parser {
 		}
 		
 		String format = "\nparameter.associated<-list(%s)\n";
-		fout.write(String.format(format, stmt));
+		fout.write(String.format(format, stmt));*/
 	}
 	
 	private void writePFIMProjectFile() throws IOException {
@@ -1606,6 +2532,15 @@ public class Parser extends crx.converters.r.Parser {
 		writeComputePowerEquivalence(fout);
 		writeComputeNNIEquivalence(fout);
 		writeGivenPower(fout);
+	}
+	
+	@Override
+	public void writePreMainBlockElements(PrintWriter fout, File output_dir) throws IOException {
+		if (fout == null) return;
+		
+		writeScriptHeader(fout, lexer.getModelFilename());
+		writeAllModelFunctions(output_dir);
+		writeScriptLibraryReferences(fout);
 	}
 	
 	private void writePreviousFIM(PrintWriter fout) {
@@ -1660,9 +2595,6 @@ public class Parser extends crx.converters.r.Parser {
 		fout.write(String.format(format, list, comment_char));
 	}
 	
-	@Override
-	protected void writePurgeCommand(PrintWriter fout) {}
-	
 	private void writeRandomEffectModel(PrintWriter fout) {
 		String format = "\nTrand<-%s; %s Random Effect model\n";
 		fout.write(String.format(format, Trand, comment_char));
@@ -1688,15 +2620,16 @@ public class Parser extends crx.converters.r.Parser {
 	private void writeRun(PrintWriter fout) {
 		if (fout == null) return;
 		
-		String run = null;
+		//String run = null;
 		
-		if (lexer.hasSimulation()) run = "EVAL";
-		else if (lexer.hasEstimation()) run = "OPT";
+		// TODO: Update this clause with OD Lexer Logic
+		//if (lexer.hasSimulation()) run = "EVAL";
+		//else if (lexer.hasEstimation()) run = "OPT";
 		
-		if (run == null) throw new IllegalStateException("Unable to determine the 'RUN' option.");
+		//if (run == null) throw new IllegalStateException("Unable to determine the 'RUN' option.");
 		
-		String format = "\nrun<-\"%s\"\n";
-		fout.write(String.format(format, run));
+		//String format = "\nrun<-\"%s\"\n";
+		//fout.write(String.format(format, run));
 	}
 	
 	@Override
@@ -1736,10 +2669,7 @@ public class Parser extends crx.converters.r.Parser {
 		fout.write(String.format(format, comment_char, new Date()));
 	}
 	
-	@Override
-	protected void writeScriptLibraryReferences(PrintWriter fout) throws IOException {
-		if (use_compiled_structural_model) fout.write("library(compiler)\n");
-		
+	private void writeScriptLibraryReferences(PrintWriter fout) throws IOException {
 		String format = "\nsource('%s')\n";
 		fout.write(String.format(format, this.getPFIMProjectFilepath()));
 		fout.write("PFIM()\n");
@@ -1785,7 +2715,11 @@ public class Parser extends crx.converters.r.Parser {
 		fout.write(String.format(format, "Hmax", hmax));
 	}
 	
-	private void writeStdin() throws IOException {
+	/**
+	 * Write a PFIM STDIN file.
+	 * @throws IOException
+	 */
+	public void writeSTDIN() throws IOException {
 		if (writtenSTDIN) return;
 		
 		String outFilepath = getStdinFilepath();
@@ -1819,7 +2753,7 @@ public class Parser extends crx.converters.r.Parser {
 		String format = "\nsubjects<-c(%s) %s No. Subjects\n";
 		fout.write(String.format(format, numberOfSubjects, comment_char));
 	}
-	
+
 	private void writeSubjectsOptimisation(PrintWriter fout) {
 		String value = parse(optimisationOfProportionsOfSubjects, tm.newInstance(optimisationOfProportionsOfSubjects)).trim();
 		String format = "\nsubjects.opt<-%s %s OPT on proportions of subjects\n";
@@ -1855,7 +2789,7 @@ public class Parser extends crx.converters.r.Parser {
 		String format = "\ncovariate.model<-%s %s Add covariate to the model\n";
 		fout.write(String.format(format, option, comment_char));
 	}
-	
+
 	private void writeXAxesNames(PrintWriter fout) {
 		if (xAxesNames == null) return;
 
@@ -1877,7 +2811,7 @@ public class Parser extends crx.converters.r.Parser {
 		String format = "\nnames.datay<-%s\n";
 		fout.write(String.format(format, value));
 	}
-	
+
 	private void writeYAxesRange(PrintWriter fout) {
 		String value = "NULL";
 		
