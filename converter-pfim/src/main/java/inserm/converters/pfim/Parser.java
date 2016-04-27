@@ -1123,6 +1123,7 @@ public class Parser extends BaseParser {
 	    else if (o instanceof CovariateParameterRef) symbol = doCovariateParameterRef((CovariateParameterRef) o);
 	    else if (o instanceof CategoricalCovariateRef) symbol = doCategoricalCovariateRef((CategoricalCovariateRef) o);
 	    else if (o instanceof ConditionalDoseEventRef) symbol = doConditionalDoseEventRef((ConditionalDoseEventRef) o);
+	    else if (o instanceof Boolean) symbol = doJavaBoolean((Boolean) o);
 	    else 
 	    {
 	    	String format = "WARNING: Unknown symbol, %s\n";
@@ -1907,6 +1908,11 @@ public class Parser extends BaseParser {
 		
 		String format = "\ncovariate.category<-list(%s)\n";
 		fout.write(String.format(format, stmt));
+	}
+	
+	private String doJavaBoolean(Boolean value) {
+		if (value) return doTrue();
+		else return doFalse();
 	}
 	
 	private void writeCovariateModel(PrintWriter fout) {
