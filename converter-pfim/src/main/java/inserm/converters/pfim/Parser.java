@@ -280,14 +280,12 @@ public class Parser extends BaseParser {
 	}
 	
 	private static final String CURRENT_WORKING_DIR = "CURRENT_WORKING_DIR";
-	
 	private static final String PFIM_PROGRAM_DIR = "PFIM_PROGRAM_DIR";
-	
 	private static final String pfimProjectFilename = "PFIM";
-	
 	private static String pfimStdinFilename = "stdin";
 	private static String pfimStdoutFilename = "Stdout";
 	private static final String PREFERRED_SEPERATOR = "/";
+	
 	private static void addElement(Vector dst, VectorElements elements, Object element, Accessor a) {
 		if (isInteger(element)) {
 			Integer v = (Integer) element;
@@ -538,13 +536,9 @@ public class Parser extends BaseParser {
 	private boolean writingAnalyticalModel = false;
 	private boolean writingModelFunctionScopedVariable = false;
 	private boolean writtenSTDIN = false;
-	
 	private boolean wrotePFIM_R = false;
-	
 	private Vector xAxesNames = null;
-	
 	private Vector yAxesNames = null;
-	
 	private Vector yAxesRange = null;
 	
 	public Parser() throws IOException {
@@ -1902,7 +1896,7 @@ public class Parser extends BaseParser {
 		for (CategoricalCovariateRef ccov : ccovs) {
 			if (ccov == null) continue;
 			if (i > 0) stmt.append(",");
-			//stmt.append(parse(ccov, lexer.getStatement(ccov))); // TODO: Res
+			stmt.append(parse(ccov, lexer.getStatement(ccov))); // TODO: Work
 			i++;
 		}
 		
