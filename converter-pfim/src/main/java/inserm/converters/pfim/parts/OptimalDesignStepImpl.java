@@ -312,4 +312,7 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 			else if (OPTIMISATION.equals(type)) optimisation = true;
 		}
 	}
+	
+	@Override
+	public String toString() { return step.getOid(); }
 }

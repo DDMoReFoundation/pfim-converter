@@ -16,31 +16,18 @@
 
 package inserm.converters.pfim;
 
-/**
- * Generic FIM calculation options.
- */
-public enum FIMOption {
-	Bayesian("B"),
-	Individual("I"),
-	Population("P");
+public enum OutputFIMFormat {
+	BLOCK_DIAGONAL_FIM("1"),
+	COMPLETE_FIM("useCovariateOccassionModel");
 	
-	public static boolean contains(String value){
-		for (FIMOption item : values()) 
-			if(item.toString().equals(value)) return true;
-			
-		return false;
+	public static  OutputFIMFormat fromValue(String value){
+		for(OutputFIMFormat item : values()) if (item.toString().equals(value)) return item;
+		throw new IllegalArgumentException("Unknown enum type \""+ value+ "\".");
 	}
 	
 	private String value;
 	
-	private FIMOption(String value_){ value = value_; }
-	
-	public FIMOption fromValue(String value){
-		for(FIMOption item : values())
-			if (item.toString().equals(value)) return item;
-			
-		throw new IllegalArgumentException("Unknown enum type \""+ value+ "\".");
-	}
+	private OutputFIMFormat(String value_){ value = value_; }
 	
 	@Override
 	public String toString(){ return value; }

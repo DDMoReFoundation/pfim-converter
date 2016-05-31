@@ -18,7 +18,6 @@ package inserm.converters.pfim;
 
 import static crx.converter.engine.PharmMLTypeChecker.isBinaryOperation;
 import static crx.converter.engine.PharmMLTypeChecker.isConstant;
-import static crx.converter.engine.PharmMLTypeChecker.isCovariate;
 import static crx.converter.engine.PharmMLTypeChecker.isDerivative;
 import static crx.converter.engine.PharmMLTypeChecker.isFalse;
 import static crx.converter.engine.PharmMLTypeChecker.isFunctionCall;
@@ -31,7 +30,6 @@ import static crx.converter.engine.PharmMLTypeChecker.isLogicalUnaryOperation;
 import static crx.converter.engine.PharmMLTypeChecker.isParameterEstimate;
 import static crx.converter.engine.PharmMLTypeChecker.isPiecewise;
 import static crx.converter.engine.PharmMLTypeChecker.isPopulationParameter;
-import static crx.converter.engine.PharmMLTypeChecker.isRandomVariable;
 import static crx.converter.engine.PharmMLTypeChecker.isReal;
 import static crx.converter.engine.PharmMLTypeChecker.isRhs;
 import static crx.converter.engine.PharmMLTypeChecker.isSequence;
@@ -61,9 +59,11 @@ import crx.converter.engine.Accessor;
 import crx.converter.engine.ConversionDetail_;
 import crx.converter.engine.FixedParameter;
 import crx.converter.engine.SymbolReader.ModifiedSymbol;
+import crx.converter.engine.common.BaseParser;
 import crx.converter.engine.common.IndividualParameterAssignment;
-import crx.converter.spi.ILexer;
+import crx.converter.spi.OptimalDesignLexer;
 import crx.converter.spi.blocks.StructuralBlock;
+import crx.converter.spi.steps.OptimalDesignStep_;
 import crx.converter.tree.BinaryTree;
 import crx.converter.tree.Node;
 import crx.converter.tree.TreeMaker;
@@ -88,32 +88,37 @@ import eu.ddmore.libpharmml.dom.maths.LogicBinOp;
 import eu.ddmore.libpharmml.dom.maths.LogicUniOp;
 import eu.ddmore.libpharmml.dom.maths.Piece;
 import eu.ddmore.libpharmml.dom.maths.Piecewise;
-import eu.ddmore.libpharmml.dom.modeldefn.CovariateDefinition;
-import eu.ddmore.libpharmml.dom.modeldefn.ParameterRandomVariable;
 import eu.ddmore.libpharmml.dom.modeldefn.PopulationParameter;
+import eu.ddmore.libpharmml.dom.modellingsteps.FIMtype;
 import eu.ddmore.libpharmml.dom.modellingsteps.ParameterEstimate;
 import eu.ddmore.libpharmml.dom.uncertml.VarRefType;
 
 /**
  * PFIM R-based code generator.
  */
-public class Parser extends crx.converter.engine.common.BaseParser {
+public class Parser extends BaseParser {
 	private static final String MODEL_FILESTEM = "model";
+	private static final String pfimFIMFilename = "FIM.txt";
 	private static final String pfimProjectFilename = "PFIM";
+	private static final String pfimStdinFilename = "stdin";
+	private static final String pfimStdoutFilename = "stdout.out";
 	private static final String PREFERRED_SEPERATOR = "/";
+	
+	private FIMtype fim_type = FIMtype.P;
 	private String leftArrayBracket = null;
+	private OutputFIMFormat option = OutputFIMFormat.BLOCK_DIAGONAL_FIM;
 	private String output_state_vector_symbol = "yd";
+	private String outputFIMFilename = pfimFIMFilename;
 	private String param_model_symbol  = null;
 	private List<String> pfimProjectTemplate = new ArrayList<String>();
+	private String previousFIM = "";
 	private String programDirectory = ".";
 	private Properties props = null;
 	private String rightArrayBracket = null;
 	private String state_vector_symbol = null;
-	
-	/**
-	 * Use a compiled model in R.
-	 */
-	protected boolean use_compiled_structural_model = false;
+	private String stdoutFilename = pfimStdoutFilename;
+	private boolean writtenSTDIN = false;
+	private boolean wrotePFIM_R = false;
 	
 	/**
 	 * Constructor
@@ -148,13 +153,7 @@ public class Parser extends crx.converter.engine.common.BaseParser {
 		if (System.getProperty("PFIM_PROG_DIR") != null) programDirectory = System.getProperty("PFIM_PROG_DIR");
 	}
 	
-	/**
-	 * Generate code for an array access.
-	 * @param variableName Script variable name
-	 * @param idx Index
-	 * @return String
-	 */
-	protected String doArrayAccess(String variableName, Integer idx) {
+	private String doArrayAccess(String variableName, Integer idx) {
 		String format = "%s%s%s%s";
 		
 		if (variableName == null || idx == null) throw new NullPointerException("Required array access data is NULL");
@@ -162,11 +161,9 @@ public class Parser extends crx.converter.engine.common.BaseParser {
 		return String.format(format, variableName, leftArrayBracket, idx, rightArrayBracket);
 	}
 	
-	protected String doBigInteger(BigInteger i) {
-		return i.toString();
-	}
+	private String doBigInteger(BigInteger i) { return i.toString(); }
 	
-	protected String doConstant(Constant c) {
+	private String doConstant(Constant c) {
 		String symbol = unassigned_symbol;
 		
 		String op = c.getOp();
@@ -178,16 +175,12 @@ public class Parser extends crx.converter.engine.common.BaseParser {
 		return symbol;
 	}
 
-	protected String doCovariate(CovariateDefinition cov) {		
-		return cov.getSymbId();
-	}
-	
 	private String doDerivative(DerivativeVariable s) {
 		Integer idx = lexer.getStateVariableIndex(s.getSymbId());
 		String format = "%s%s";
 		return String.format(format, output_state_vector_symbol, idx);
 	}
-	
+
 	protected String doElement(JAXBElement<?> element) {
 		String symbol = unassigned_symbol;
 		
@@ -304,23 +297,15 @@ public class Parser extends crx.converter.engine.common.BaseParser {
 		return String.format(format, parse(new Object(), tm.newInstance(pieces.get(0).getCondition())));
 	}
 	
-	protected String doRandomVariable(ParameterRandomVariable rv) {
-		return rv.getSymbId();
-	}
+	private String doReal(RealValue r) { return Double.toString(r.getValue()); }
 	
-	protected String doReal(RealValue r) { return Double.toString(r.getValue()); }
 	
-	/**
-	 * Write code for a raw equation parsing to a target language.
-	 * @param eq Equation or expression
-	 * @return String
-	 */
-	protected String doRhs(Rhs eq) {
+	private String doRhs(Rhs eq) {
 		TreeMaker tm = lexer.getTreeMaker();
 		return parse(new Object(), tm.newInstance(eq));
 	}
 	
-	protected String doSequence(Sequence o) {
+	private String doSequence(Sequence o) {
 		String symbol = unassigned_symbol;
 		
 		Sequence seq = (Sequence) o;
@@ -363,19 +348,14 @@ public class Parser extends crx.converter.engine.common.BaseParser {
 		return symbol;
 	}
 	
-	protected String doString(String v) { return v; }
+	private String doString(String v) { return v; }
 	
-	protected String doStringValue(StringValue sv) {
+	private String doStringValue(StringValue sv) {
 		String format = "'%s'";
 		return String.format(format, sv.getValue());
 	}
 	
-	/**
-	 * Write code representing a model symbol reference.
-	 * @param s Symbol Reference
-	 * @return String
-	 */
-	protected String doSymbolRef(SymbolRef s) {
+	private String doSymbolRef(SymbolRef s) {
 		String symbol = s.getSymbIdRef();
 		
 		Accessor a = lexer.getAccessor();
@@ -404,9 +384,9 @@ public class Parser extends crx.converter.engine.common.BaseParser {
 		return symbol;
 	}
 	
-	protected String doTrue() { return "TRUE"; }
+	private String doTrue() { return "TRUE"; }
 	
-	protected String doVarRef(VarRefType ref) {
+	private String doVarRef(VarRefType ref) {
 		String symbol = unassigned_symbol;
 		
 		PharmMLRootType element = lexer.getAccessor().fetchElement(ref);
@@ -417,7 +397,7 @@ public class Parser extends crx.converter.engine.common.BaseParser {
 		return symbol;
 	}
 	
-	protected String doVector(Vector v) {
+	private String doVector(Vector v) {
 		String symbol = unassigned_symbol;
 		
 		ArrayList<String> values = new ArrayList<String>();
@@ -453,11 +433,14 @@ public class Parser extends crx.converter.engine.common.BaseParser {
 		return String.format("%s%s%s.%s", output_dir, File.separator, MODEL_FILESTEM, script_file_suffix);
 	}
 	
-	
-	
 	private String getPFIMProjectFilepath() throws IOException {
 		String cwd = lexer.getOutputDirectory();
 		return cwd + PREFERRED_SEPERATOR + pfimProjectFilename + "." + script_file_suffix;
+	}
+	
+	private String getStdinFilepath() {
+		String cwd = lexer.getOutputDirectory();
+		return cwd + PREFERRED_SEPERATOR + pfimStdinFilename + "." + script_file_suffix;
 	}
 	
 	@Override
@@ -485,9 +468,7 @@ public class Parser extends crx.converter.engine.common.BaseParser {
 	    else if (isParameterEstimate(o)) symbol = doParameterEstimate((ParameterEstimate) o);
 	    else if (isJAXBElement(o)) symbol = doElement((JAXBElement<?>) o);	
 	    else if (isVariableReference(o)) symbol = doVarRef((VarRefType) o);	
-	    else if (isRandomVariable(o)) symbol = doRandomVariable((ParameterRandomVariable) o);
-	    else if (o instanceof IndividualParameterAssignment) symbol = doIndividualParameterAssignment((IndividualParameterAssignment) o);
-	    else if (isCovariate(o)) symbol = doCovariate((CovariateDefinition) o);	
+	    else if (o instanceof IndividualParameterAssignment) symbol = doIndividualParameterAssignment((IndividualParameterAssignment) o);	
 	    else if (isBigInteger(o)) symbol = doBigInteger((BigInteger) o);
 	    else if (isRhs(o)) symbol = doRhs((Rhs) o);
 	    else if (o instanceof Boolean) symbol = doJavaBoolean((Boolean) o);
@@ -596,7 +577,30 @@ public class Parser extends crx.converter.engine.common.BaseParser {
 			throw new IllegalStateException("Should be a statement string bound to the root.data element.");
 	}
 	
-	public void setUseCompiledStructuralModel(boolean decision) { use_compiled_structural_model = decision; }
+	/**
+	 * Set the type of FIM matrix generated by PFIM.
+	 * @param type FIM Type
+	 */
+	public void setFIMType(String type) {
+		if (type == null) return;
+		fim_type = FIMtype.valueOf(type.toUpperCase());
+	}
+	
+	/**
+	 * Specify the R-generated output filename in the CWD.
+	 * @param filename Output Filename
+	 */
+	public void setOutputFIMFilename(String filename) {
+		if (filename != null) outputFIMFilename = filename;
+	}
+	
+	/**
+	 * Specify the STDOUT filename
+	 * @param filename
+	 */
+	public void setStdoutFilename(String filename) {
+		if (filename != null) stdoutFilename = filename;
+	}
 	
 	private void writeAllModelFunctions(File output_dir) throws IOException {
 		StructuralBlock sb = lexer.getStrucuturalBlock();	
@@ -617,6 +621,21 @@ public class Parser extends crx.converter.engine.common.BaseParser {
 		fout.write("\n");
 	}
 	
+	private void writeFIMType(PrintWriter fout) {
+		if (fout == null) return;
+		
+		String format = "FIM<-\"%s\"\n";
+		fout.write(String.format(format, fim_type));
+	}
+	
+	private void writeGraphOnly(PrintWriter fout) {
+		String decision = "FALSE";
+		if (lexer.hasPlottingBlock()) decision = "TRUE";
+		
+		String format = "graph.only<-%s\n";
+		fout.write(String.format(format, decision));
+	}
+	
 	private void writeIndividualParameterAssignments(PrintWriter fout) {
 		if (fout == null) return;
 		ParameterBlockImpl pb = (ParameterBlockImpl) lexer.getParameterBlock();
@@ -634,11 +653,35 @@ public class Parser extends crx.converter.engine.common.BaseParser {
 		fout.write("\n");
 	}
 	
+	private void writeModelFile(PrintWriter fout) {
+		String model_filename = MODEL_FILESTEM + "." + script_file_suffix;
+		String format = "file.model<-\"%s\" %s Model Filename\n";
+		fout.write(String.format(format, model_filename, comment_char));
+	}
+	
+	private void writeModelForm(PrintWriter fout) {
+		String form = "AF";
+		
+		StructuralBlock sb = lexer.getStrucuturalBlock();
+		if (sb == null) throw new NullPointerException("Structural Block is NULL"); 
+		if (sb.isODE()) form = "DE";
+		
+		String format = "modelform<-\"%s\"\n";
+		fout.write(String.format(format, form));
+	}
+	
 	private void writeModelFunction(PrintWriter fout, StructuralBlock sb) throws IOException {
 		if (fout == null) throw new NullPointerException();
 		
 		writeScriptHeader(fout, lexer.getModelFilename());
 		if (sb.isODE()) writeODEModelFunction(fout, sb);
+	}
+	
+	private void writeNumberOfResponses(PrintWriter fout) {
+		Integer nr = lexer.getObservationBlocks().size();
+		String format = "nr<-%s\n";
+		
+		fout.write(String.format(format, nr, comment_char));
 	}
 	
 	private void writeODEModelFunction(PrintWriter fout, StructuralBlock sb) {
@@ -689,17 +732,22 @@ public class Parser extends crx.converter.engine.common.BaseParser {
 		}
 	}
 	
-	@Override
-	public void writePreMainBlockElements(PrintWriter fout, File output_dir) throws IOException{
-		if (fout == null) return;
-		
-		writePFIMProjectFile();
-		writeScriptHeader(fout, lexer.getModelFilename());
-		writeAllModelFunctions(output_dir);
-		writeScriptLibraryReferences(fout);
+	private void writeOption(PrintWriter fout) {
+		String format = "option<-%s\n";
+		fout.write(String.format(format, option));
 	}
 	
-	private boolean wrotePFIM_R = false;
+	private void writeOutputFilename(PrintWriter fout) {
+		String format = "output<-\"%s\" %s Output Filename\n";
+		fout.write(String.format(format, stdoutFilename, comment_char));
+	}
+
+	private void writeOutputFIMFilename(PrintWriter fout) {
+		if (fout == null) return;
+		
+		String format = "outputFIM<-\"%s\"\n";
+		fout.write(String.format(format, outputFIMFilename));
+	}
 	
 	private void writePFIMProjectFile() throws IOException {
 		if (wrotePFIM_R) return;
@@ -718,6 +766,43 @@ public class Parser extends crx.converter.engine.common.BaseParser {
 		fout.close();
 		
 		wrotePFIM_R = true;
+	}
+	
+	@Override
+	public void writePreMainBlockElements(PrintWriter fout, File output_dir) throws IOException{
+		if (fout == null) return;
+		
+		writePFIMProjectFile();
+		writeScriptHeader(fout, lexer.getModelFilename());
+		writeAllModelFunctions(output_dir);
+		writeScriptLibraryReferences(fout);
+	}
+	
+	private void writePreviousFIM(PrintWriter fout) {
+		String format = "previous.FIM<-\"%s\"\n";
+		fout.write(String.format(format, previousFIM));
+	}
+	
+	private void writeProjectName(PrintWriter fout) {
+		String format = "project<-\"%s\" %s Project Name\n";
+		fout.write(String.format(format, lexer.getModelName(), comment_char));
+	}
+	
+	private void writeRun(PrintWriter fout) {
+		if (fout == null) return;
+		OptimalDesignLexer od_lexer = (OptimalDesignLexer) lexer;
+		OptimalDesignStep_ step = od_lexer.getOptimalDesignStep();
+		
+		if (step == null) throw new NullPointerException("Optional Design Step is NULL");
+		
+		String run = null;
+		if (step.isEvaluation()) run = "EVAL";
+		else if (step.isOptimisation()) run = "OPT";
+		
+		if (run == null) throw new IllegalStateException("Unable to determine the PFIM 'RUN' option.");
+		
+		String format = "run<-\"%s\"\n";
+		fout.write(String.format(format, run));
 	}
 	
 	@Override
@@ -761,5 +846,33 @@ public class Parser extends crx.converter.engine.common.BaseParser {
 		String format = "\nsource('%s')\n";
 		fout.write(String.format(format, this.getPFIMProjectFilepath()));
 		fout.write("PFIM()\n");
+	}
+	
+	/**
+	 * Write a PFIM STDIN file.
+	 * @throws IOException
+	 */
+	public void writeSTDIN() throws IOException {
+		if (writtenSTDIN) return;
+		
+		String outFilepath = getStdinFilepath();
+		
+		PrintWriter fout = new PrintWriter(outFilepath);
+		writeScriptHeader(fout, lexer.getModelFilename());
+		writeProjectName(fout);
+		writeModelFile(fout);
+		writeOutputFilename(fout);
+		writeOutputFIMFilename(fout);
+		writeFIMType(fout);
+		writePreviousFIM(fout);
+		writeRun(fout);
+		writeGraphOnly(fout);
+		writeOption(fout);
+		writeNumberOfResponses(fout);
+		writeModelForm(fout);
+		
+		fout.close();
+		
+		writtenSTDIN = true;
 	}
 }
