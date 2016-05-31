@@ -18,15 +18,18 @@ package inserm.converters.pfim.parts;
 
 import static crx.converter.engine.PharmMLTypeChecker.isCorrelation;
 import static crx.converter.engine.PharmMLTypeChecker.isIndividualParameter;
+import static crx.converter.engine.PharmMLTypeChecker.isParameter;
 import static crx.converter.engine.PharmMLTypeChecker.isPopulationParameter;
 import static crx.converter.engine.PharmMLTypeChecker.isRandomVariable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import crx.converter.engine.assoc.Cluster;
 import crx.converter.engine.common.CorrelationRef;
+import crx.converter.engine.common.IndividualParameterAssignment;
 import crx.converter.engine.common.ParameterEvent;
 import crx.converter.spi.ILexer;
 import crx.converter.spi.blocks.OrderableBlock;
@@ -40,6 +43,7 @@ import eu.ddmore.libpharmml.dom.commontypes.SymbolRef;
 import eu.ddmore.libpharmml.dom.modeldefn.CommonParameter;
 import eu.ddmore.libpharmml.dom.modeldefn.Correlation;
 import eu.ddmore.libpharmml.dom.modeldefn.IndividualParameter;
+import eu.ddmore.libpharmml.dom.modeldefn.Parameter;
 import eu.ddmore.libpharmml.dom.modeldefn.ParameterModel;
 import eu.ddmore.libpharmml.dom.modeldefn.ParameterRandomVariable;
 import eu.ddmore.libpharmml.dom.modeldefn.PopulationParameter;
@@ -50,9 +54,10 @@ import eu.ddmore.libpharmml.dom.modeldefn.PopulationParameter;
 public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements OrderableBlock, ParameterBlock {	
 	private List<PharmMLRootType> cached_declaration_list = new ArrayList<PharmMLRootType>();
 	private List<ParameterEvent> events = new ArrayList<ParameterEvent>();
+	private List<IndividualParameterAssignment> ipas = new ArrayList<IndividualParameterAssignment>();
 	private List<PharmMLElement> objects_to_remove = new ArrayList<PharmMLElement>();
-	private HashMap<CommonParameter, Integer> param_map_idx = new HashMap<CommonParameter, Integer>();
-	private HashMap<String, CommonParameter> param_map_name = new HashMap<String, CommonParameter>(); 
+	private Map<CommonParameter, Integer> param_map_idx = new HashMap<CommonParameter, Integer>(); 
+	private Map<String, CommonParameter> param_map_name = new HashMap<String, CommonParameter>();
 	private ArrayList<PopulationParameter> params = new ArrayList<PopulationParameter>();
 	private ParameterModel pm = null;
 	
@@ -63,6 +68,7 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 	 */
 	public ParameterBlockImpl(ParameterModel pm_, ILexer c_) {
 		if (pm_ == null) throw new NullPointerException("ParameterModel is NULL.");
+		recast_parameters(pm_);
 		pm = pm_;
 		
 		if (pm.getBlkId() == null)  throw new IllegalStateException("Parameter model must have a BLK ID");
@@ -88,6 +94,7 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 				param_map_idx.put(ip, idx);
 				indiv_params.add(ip);
 				param_map_name.put(symbolId, ip);
+				ipas.add(new IndividualParameterAssignment(ip));
 			} else if (isRandomVariable(o)) {
 				ParameterRandomVariable rv = (ParameterRandomVariable) o;
 				String symbolId = rv.getSymbId();
@@ -99,12 +106,16 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 			else new UnsupportedOperationException("PharmML type not supported yet (type=" + o + ")");
 		}
 		
-		
 		removeMatrixParameters();
 	}
 	
 	@Override
 	public boolean addCluster(Cluster cluster) { throw new UnsupportedOperationException(); }
+	
+	private void buildIPATrees() {
+		TreeMaker tm = lexer.getTreeMaker();
+		for (Object ipa : ipas) lexer.addStatement(ipa, tm.newInstance(ipa));
+	}
 	
 	private void buildMatrixDeclarationTrees() {
 		if (has_matrices.size() == 0) return;
@@ -147,6 +158,7 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 			
 		buildIndividualParameterTrees();
 		buildMatrixDeclarationTrees();
+		buildIPATrees();
 	}
 	
 	private void clearAllParameterLists() {
@@ -184,7 +196,19 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 		}
 		
 		return false;
-	} 
+	}
+	
+	private PopulationParameter createPopulationParameter(String name) {
+		if (name == null) throw new NullPointerException("Parameter 'name' is NULL");
+		
+		PopulationParameter p = new PopulationParameter();
+		p.setSymbId(name);
+		
+		Rhs rhs = new Rhs();
+		p.setAssign(rhs);
+		
+		return p;
+	}
 	
 	@Override
 	public List<Cluster> getClusters() { throw new UnsupportedOperationException(); }
@@ -194,7 +218,13 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 	 * @return java.util.List<Event>
 	 * @see ParameterBlockImpl#hasEvents()
 	 */
-	public List<ParameterEvent> getEvents() { return events; }
+	public List<ParameterEvent> getEvents() { return events; } 
+	
+	/**
+	 * Get of individual parameteter assignments.
+	 * @return java.util.List<IndividualParameterAssignment>
+	 */
+	public List<IndividualParameterAssignment> getIndividualParameterAssignments() { return ipas; }
 	
 	/**
 	 * All of the declared variables in the parameter model.
@@ -241,16 +271,13 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 		if (param_map_name.containsKey(name)) {
 			CommonParameter p = (param_map_name.get(name));
 			if (p != null) {
-				if (param_map_idx.containsKey(p)) {
-					idx = param_map_idx.get(p);
-					if (lexer.isIndexFromZero()) idx--;
-				}
+				if (param_map_idx.containsKey(p)) idx = param_map_idx.get(p);
 			}
 		}
 
 		return idx;
 	}
- 	
+	
 	/**
 	 * Get the index of a parameter in the numeric parameter array passed to a model function.
 	 * @param ref Reference to the parameter
@@ -270,7 +297,7 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 		
 		return idx;
 	}
-
+ 	
 	/**
 	 * Get a list of numeric parameters.
 	 * @return java.util.List<eu.ddmore.libpharmml.dom.modeldefn.PopulationParameter>
@@ -282,7 +309,7 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 	 * @return java.util.List<eu.ddmore.libpharmml.dom.modeldefn.ParameterRandomVariable>
 	 */
 	public List<ParameterRandomVariable> getRandomVariables(){ return rvs; }
-	
+
 	@Override
 	public List<String> getSymbolIds() {
 		ArrayList<String> ids = new ArrayList<String>();
@@ -341,13 +368,41 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 		if (rv != null) return linked_rvs.contains(rv);
 		else return false;
 	}
+	
+	private boolean recast(ParameterModel pm, Parameter p) {
+		if (pm == null || p == null) return false;
+		else {
+			List<PharmMLElement> elements = pm.getListOfParameterModelElements();
+			if (elements == null) return false;
+			if (elements.isEmpty()) return false;
+			
+			if (!elements.contains(p)) return false;
+			PopulationParameter new_p = createPopulationParameter(p.getSymbId());
+			new_p.setAssign(p.getAssign());
+			
+			elements.remove(p);
+			elements.add(new_p);
+			
+			return true;
+		}
+	}
+
+	private void recast_parameters(ParameterModel pm_) {
+		if (pm_ == null) return;
+		
+		List<PharmMLElement> elements = pm_.getListOfParameterModelElements();
+		List<Parameter> simple_parameters = new ArrayList<Parameter>();
+		
+		for (Object o : elements) if (isParameter(o)) simple_parameters.add((Parameter) o);
+		for (Parameter p : simple_parameters) recast(pm_, p);
+	}
 
 	// Remove so do not show up in the numeric parameter vector but as part of a matrix assignment block.
 	private void removeMatrixParameters() {
 		if(objects_to_remove.size() == 0) return;
 		pm.getListOfParameterModelElements().removeAll(objects_to_remove);
 	}
-
+	
 	/**
 	 * Set the ordered parameter list within the parameter block.<br/>
 	 * This is set outside of the ParameterBlock, hence this accessor function.

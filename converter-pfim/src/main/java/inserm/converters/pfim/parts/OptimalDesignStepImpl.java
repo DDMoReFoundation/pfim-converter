@@ -18,56 +18,39 @@ package inserm.converters.pfim.parts;
 
 import static crx.converter.engine.PharmMLTypeChecker.isIndividualParameter;
 import static crx.converter.engine.PharmMLTypeChecker.isPopulationParameter;
+import static eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignOpType.EVALUATION;
+import static eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignOpType.OPTIMISATION;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import crx.converter.engine.Accessor;
 import crx.converter.engine.FixedParameter;
 import crx.converter.engine.parts.SortableElement;
 import crx.converter.spi.ILexer;
 import crx.converter.spi.blocks.ParameterBlock;
-import crx.converter.spi.steps.EstimationStep;
+import crx.converter.spi.steps.OptimalDesignStep_;
 import crx.converter.tree.TreeMaker;
 import eu.ddmore.libpharmml.dom.commontypes.PharmMLRootType;
 import eu.ddmore.libpharmml.dom.commontypes.RealValue;
 import eu.ddmore.libpharmml.dom.commontypes.SymbolRef;
 import eu.ddmore.libpharmml.dom.modeldefn.PopulationParameter;
-import eu.ddmore.libpharmml.dom.modellingsteps.Estimation;
-import eu.ddmore.libpharmml.dom.modellingsteps.EstimationOpType;
-import eu.ddmore.libpharmml.dom.modellingsteps.EstimationOperation;
 import eu.ddmore.libpharmml.dom.modellingsteps.InitialEstimate;
+import eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignOpType;
+import eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignOperation;
+import eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignStep;
 import eu.ddmore.libpharmml.dom.modellingsteps.ParameterEstimate;
 import eu.ddmore.libpharmml.dom.modellingsteps.ToEstimate;
 
 /**
- * A class the wraps an estimation code block.
- *
+ * PFIM specific implementation of an optimal design step wrapper.
  */
-public class EstimationStepImpl extends BaseStepImpl implements EstimationStep {
+public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesignStep_ {
 	private static double defaultParameterEstimateValue = 1.0;
 	private static boolean useDefaultParameterEstimate = false;
-	
-	/**
-	 * Check that the estimation operation is an individual parameter estimation.
-	 * @param op
-	 * @return boolean
-	 * @see eu.ddmore.libpharmml.dom.modellingsteps.EstimationOpType#EST_INDIV
-	 */
-	public static boolean isIndividualParameterEstimate(EstimationOperation op) {
-		if (op != null) {
-			String type = op.getOpType();
-			EstimationOpType value = EstimationOpType.fromValue(type);
-			if (value != null) {
-				return value.equals(EstimationOpType.EST_INDIV);
-			}
-		}
-		
-		return false;
-	}
-	
 	/**
 	 * Set the value for the default parameter estimate.<br/>
 	 * Only assigned if not specified in a PharmML document.
@@ -75,86 +58,79 @@ public class EstimationStepImpl extends BaseStepImpl implements EstimationStep {
 	 */
 	public static void setDefaultParameterEstimateValue(double value) { defaultParameterEstimateValue = value; }
 	
-	/**
-	 * Instruct a converter to use a default parameter estimate.<br/>
-	 * Instruct the converter whether it can tolerate parameter calculation without an initial estimate.
-	 * @param decision
-	 */
-	public static void setUseDefaultParameterEstimate(boolean decision) { useDefaultParameterEstimate = decision; }
-	 
-	private Estimation est = null;
-	private HashMap<ParameterEstimate, Integer> estimate_to_index = new HashMap<ParameterEstimate, Integer>();
+	private Map<ParameterEstimate, Integer> estimate_to_index = new HashMap<ParameterEstimate, Integer>();
+	private boolean evaluation = false;
 	private List<FixedParameter> fixed_parameters = new ArrayList<FixedParameter>();
-	private HashMap<ParameterEstimate, Integer> indiv_estimate_to_index = new HashMap<ParameterEstimate, Integer>();
-	private EstimationOperation [] operations = null;
+	private Map<ParameterEstimate, Integer> indiv_estimate_to_index = new HashMap<ParameterEstimate, Integer>();
+	private OptimalDesignOperation [] operations = null;
+	private boolean optimisation = false;
 	private List<ParameterEstimate> params_to_estimate = new ArrayList<ParameterEstimate>();
+	private OptimalDesignStep step = null;
 	
 	/**
 	 * Constructor
-	 * @param est_ Estimation Step
-	 * @param lexer_ Converter Instance
-	 * @throws NullPointerException When constructor arguments NULL
-	 * @throws IllegalStateException When estimation has no object identifier.
+	 * @param step Optimal Design Step
+	 * @param lexer Converter/Lexer handle
 	 */
-	public EstimationStepImpl(Estimation est_, ILexer lexer_) {
-		if (est_ == null) throw new NullPointerException("The estimation step cannot be NULL");
-		if (est_.getOid() == null)  throw new IllegalStateException("THe estimation step must have a OID");
-		if (lexer_ == null) throw new NullPointerException("Lexer reference is NULL");
+	public OptimalDesignStepImpl(OptimalDesignStep step_, ILexer lexer_) {
+		if (step_ == null) throw new NullPointerException("The optimal design step cannot be NULL");
+		if (lexer_ == null) throw new NullPointerException("Lexer/Converter cannot be NULL");
 		
-		est = est_;
+		step = step_;
 		lexer = lexer_;
-		a = lexer.getAccessor();
-		exd = a.fetchExternalDataSet(est.getExternalDataSetReference());
+		a = lexer_.getAccessor();
 	}
 	
 	private void buildOperationsArray() {
 		// Look for operations associated with this step (if any)
-		List<EstimationOperation> operations_ = est.getOperation();
+		List<OptimalDesignOperation> operations_ = step.getListOfOperation();
 		if (operations_ != null) {
 			ArrayList<SortableElement> operation_refs = new ArrayList<SortableElement>();
-			for (EstimationOperation operation : operations_) {
+			for (OptimalDesignOperation operation : operations_) {
 				if (operation == null) continue;
 				if (operation.getOrder() == null) continue;
 				operation_refs.add(new SortableElement(operation, operation.getOrder().intValue()));
 			}
 			Collections.sort(operation_refs);
-			operations = new EstimationOperation[operation_refs.size()];
+			operations = new OptimalDesignOperation[operation_refs.size()];
 			for (int i = 0; i < operations.length; i++) 
-				operations[i] = (EstimationOperation) operation_refs.get(i).getElement();
+				operations[i] = (OptimalDesignOperation) operation_refs.get(i).getElement();
 		} else 
-			operations = new EstimationOperation[0];
+			operations = new OptimalDesignOperation[0];
 	}
 	
 	private void buildParameterEstimateTrees() {
 		Accessor a = lexer.getAccessor();
-		
+		TreeMaker tm = lexer.getTreeMaker();
 		ParameterBlock pb = lexer.getParameterBlock();
 		if (pb == null) throw new NullPointerException("Model has no defined parameter block.");
 		
 		for (ParameterEstimate pe : params_to_estimate) {
+			if (pe == null) continue;
 			SymbolRef ref = pe.getSymbRef();
 			if (ref == null) continue;
 			
 			PharmMLRootType element = a.fetchElement(ref);
-			if (isPopulationParameter(element)) estimate_to_index.put(pe, pb.getParameterIndex(ref));
-			else if (isIndividualParameter(element)) indiv_estimate_to_index.put(pe, pb.getParameterIndex(ref));
+			if (isPopulationParameter(element)) {
+				estimate_to_index.put(pe, pb.getParameterIndex(ref));
+			} else if (isIndividualParameter(element)) indiv_estimate_to_index.put(pe, pb.getParameterIndex(ref));
+			
+			lexer.addStatement(pe, tm.newInstance(pe));
 		}
 	}
 	
 	@Override
 	public void buildTrees() {
-		if (est == null) throw new NullPointerException("Estimation step in model is NULL");
-		
 		categoriseParameterUsage();
-		buildExternalDatasetMappings();
 		buildOperationsArray();
+		setTaskType();
 		buildParameterEstimateTrees();
 	}
 	
 	private void categoriseParameterUsage() {
 		// Parameter estimates.
 		TreeMaker tm = lexer.getTreeMaker();
-		ToEstimate param_list_holder = est.getParametersToEstimate();
+		ToEstimate param_list_holder = step.getParametersToEstimate();
 		if (param_list_holder != null) {
 			List<ParameterEstimate> param_list = param_list_holder.getParameterEstimation();
 			if (param_list != null) { 
@@ -190,7 +166,7 @@ public class EstimationStepImpl extends BaseStepImpl implements EstimationStep {
 		
 		return ic;
 	}
-	
+
 	/**
 	 * Retrieves the fixed parameter record associated with a parameter estimation.
 	 * @param p Parameter Variable name
@@ -214,44 +190,21 @@ public class EstimationStepImpl extends BaseStepImpl implements EstimationStep {
 		
 		return fp;
 	}
-	
+
 	/**
 	 * Get a list of fixed parameters.
 	 * @return java.util.List<FixedParameter>
 	 */
-	public List<FixedParameter> getFixedParameters() {
-		return fixed_parameters;
-	}
-	
-	/**
-	 * Get the index value for a number in a parameter estimate vector.
-	 * @param pe Parameter Estimate
-	 * @return java.lang.Integer
-	 */
-	public Integer getIndividualParameterIndex(ParameterEstimate pe) {
-		Integer idx = -1;
-		
-		if (pe != null) {
-			if (indiv_estimate_to_index.containsKey(pe)) idx = indiv_estimate_to_index.get(pe);
-		}
-		
-		return idx;
-	}
-		
+	public List<FixedParameter> getFixedParameters() { return fixed_parameters; }
+
 	@Override
-	public String getName() {
-		String blkId = "__RUBBISH_DEFAULT_VALUE_";
-		if (est != null) {
-			if (est.getOid()  != null) blkId = est.getOid();
-		}
-		return blkId;
-	}
-	
+	public String getName() { return step.getOid(); }
+
 	/**
-	 * List of operations associated with this estimation step.
-	 * @return eu.ddmore.libpharmml.dom.modellingsteps.EstimationOperation[]
+	 * Get the operations array bound to the OD step.
+	 * @return
 	 */
-	public EstimationOperation [] getOperations() { return operations; }
+	public OptimalDesignOperation[] getOperations() { return operations; }
 	
 	/**
 	 * Get the parameter estimate objedt associated with a parameter object.
@@ -275,7 +228,7 @@ public class EstimationStepImpl extends BaseStepImpl implements EstimationStep {
 		
 		return pe;
 	}
-	
+
 	/**
 	 * Get the index number of a parameter in an estimation vector.
 	 * @param pe Parameter Estimate
@@ -290,7 +243,7 @@ public class EstimationStepImpl extends BaseStepImpl implements EstimationStep {
 		
 		return idx;
 	}
-	
+
 	/**
 	 * Get the list of parameter estimates
 	 * @return java.util.List<eu.ddmore.libpharmml.dom.modellingsteps.ParameterEstimate>
@@ -298,113 +251,65 @@ public class EstimationStepImpl extends BaseStepImpl implements EstimationStep {
 	public List<ParameterEstimate> getParametersToEstimate() { return params_to_estimate; }
 
 	/**
-	 * Get the estimation step.
-	 * @return eu.ddmore.libpharmml.dom.modellingsteps.Estimation
+	 * Get the source PharmML step for the optimal design.
+	 * @return OptimalDesignStep
 	 */
-	public Estimation getStep() { return est; }
-	
+	public OptimalDesignStep getStep() { return step; }
+
 	@Override
 	public List<String> getSymbolIds() { return new ArrayList<String>(); }
+
+	@Override
+	public String getToolName() { return ""; }
 
 	/**
 	 * Flag if the estimation has fixed parameters.
 	 * @return boolean
 	 */
 	public boolean hasFixedParameters() { return fixed_parameters.size() > 0; }
-	
+
 	/**
 	 * If the estimation has parameters to estimate.
 	 * @return boolean
 	 */
 	public boolean hasParametersToEstimate() { return params_to_estimate.size() > 0; }
-	
+
+	@Override
+	public boolean hasSymbolId(String name) { return false; }
+
 	/**
-	 * Check if the estimation has simple parameters to estimate.
+	 * Flag if the parameter estimation is constrained.
 	 * @return boolean
 	 */
-	public boolean hasSimpleParametersToEstimate() {
-		throw new UnsupportedOperationException();
-	}
-	
-	@Override
-	public boolean hasSymbolId(String name) {
+	public boolean isConstrained() {
+		for (ParameterEstimate pe : params_to_estimate) {
+			if (pe == null) continue;
+			if (pe.getLowerBound() != null || pe.getUpperBound() != null) return true;
+		}
+		
 		return false;
 	}
-	
+
 	/**
-	 * Flag if the estimation is constrained.
+	 * Flag if an evaluation task.
 	 * @return boolean
 	 */
-	public boolean isConstrained() { throw new UnsupportedOperationException(); }
-	
+	public boolean isEvaluation() { return evaluation; }
+
 	/**
-	 * Check is a given parameter is a fixed parameter in an estimation.
-	 * @param p
+	 * Flag if an optimisation task.
 	 * @return boolean
 	 */
-	public boolean isFixedParameter(PopulationParameter p) {
-		boolean isFixed = false;
-		if (p != null) {
-			for (FixedParameter fixed_parameter : fixed_parameters) {
-				if (fixed_parameter == null) continue;
-				if (fixed_parameter.pe != null) {
-					PharmMLRootType element = a.fetchElement(fixed_parameter.pe.getSymbRef());
-					if (element != null) {
-						if (p.equals(element)) {
-							isFixed = true;
-							break;
-						}
-					}
-				}
-			}
-		}
-		
-		return isFixed;
-	}
+	public boolean isOptimisation() { return optimisation; }
 	
-	/**
-	 * Update the parameter estimation order to that expressed in the parameter model.
-	 */
-	public void update() {
-		ParameterBlock pb = lexer.getParameterBlock();
-		if (pb == null) return;
-		
-		List<ParameterEstimate> pes = new ArrayList<ParameterEstimate>();
-		pes.addAll(params_to_estimate);
-		params_to_estimate.clear();
-		estimate_to_index.clear();
-		
-		Accessor a = lexer.getAccessor();
-		int idx = 0;
-		for (PopulationParameter p : pb.getParameters()) {
-			if (p == null) continue;
-			ParameterEstimate pe_found = null;
-			for (ParameterEstimate pe : pes) {
-				if (pe == null) continue;
-				SymbolRef ref = pe.getSymbRef();
-				if (ref != null) {
-					Object o = a.fetchElement(ref);
-					if (p.equals(o)) {
-						pe_found = pe;
-						break;
-					}
-				}
-			}
-			
-			if (pe_found != null) {
-				params_to_estimate.add(pe_found);
-				estimate_to_index.put(pe_found, idx++);
-				pes.remove(pe_found);
-			}
-		}
-		
-		for (ParameterEstimate pe : pes) {
-			if (pe == null) continue;
-			params_to_estimate.add(pe);
-			estimate_to_index.put(pe, idx++);
+	private void setTaskType() {
+		if (operations == null) return;
+		for (OptimalDesignOperation op : operations) {
+			if (op == null) continue;
+			OptimalDesignOpType type = op.getOpType();
+			if (type == null) continue;
+			if (EVALUATION.equals(type)) evaluation = true;
+			else if (OPTIMISATION.equals(type)) optimisation = true;
 		}
 	}
-	
-	@Override
-	public String getToolName() { throw new UnsupportedOperationException(); }
 }

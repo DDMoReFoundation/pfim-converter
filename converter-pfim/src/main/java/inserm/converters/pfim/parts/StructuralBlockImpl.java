@@ -32,7 +32,6 @@ import crx.converter.engine.common.DerivativeEvent;
 import crx.converter.spi.ILexer;
 import crx.converter.spi.blocks.OrderableBlock;
 import crx.converter.spi.blocks.StructuralBlock;
-import crx.converter.spi.steps.EstimationStep;
 import crx.converter.tree.BinaryTree;
 import crx.converter.tree.TreeMaker;
 import eu.ddmore.libpharmml.dom.commontypes.CommonVariableDefinition;
@@ -122,9 +121,6 @@ public class StructuralBlockImpl extends PartImpl implements StructuralBlock, Or
 			}
 		}
 		
-		EstimationStep est = lexer.getEstimationStep();
-		
-		
 		for (Object v : sm.getListOfStructuralModelElements()) {
 			if (isLocalVariable(v)) {
 				VariableDefinition local = (VariableDefinition) v;
@@ -134,8 +130,7 @@ public class StructuralBlockImpl extends PartImpl implements StructuralBlock, Or
 				// Check if a local variable is a dose variable specified by an external file reference.
 				// Isolate as required from the locals list.
 				boolean isConditionalDoseEventTarget = false;
-				
-				if (est != null) if (est.isConditionalDoseEventTarget(local)) isConditionalDoseEventTarget = true; 
+				 
 				if (lexer.isIsolatingDoseTimingVariable()) {
 					if (VariableDeclarationContext.DT.equals(lexer.guessContext(local))) {
 						doseTimingVariable = local;
@@ -314,7 +309,19 @@ public class StructuralBlockImpl extends PartImpl implements StructuralBlock, Or
 	public List<PKMacro> getPKMacros() { return macro_list; }
 	
 	@Override
-	public Integer getStateVariableIndex(String name) { return null; }
+	public Integer getStateVariableIndex(String name) {
+		Integer idx = -1;
+		if (name == null) return idx;
+		
+		if (state_map_name.containsKey(name)) {
+			CommonVariableDefinition s = (state_map_name.get(name));
+			if (s != null) {
+				if (state_map_idx.containsKey(s)) idx = state_map_idx.get(s);
+			}
+		}
+
+		return idx; 
+	}
 	
 	/**
 	 * Get a list of derivatvies

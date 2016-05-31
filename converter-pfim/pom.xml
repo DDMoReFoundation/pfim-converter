@@ -22,11 +22,6 @@
 	</build>
 
 	<dependencies>
-		<dependency>
-			<groupId>net.sourceforge.javacsv</groupId>
-			<artifactId>javacsv</artifactId>
-			<version>2.1</version>
-		</dependency>
 
 		<dependency>
 			<groupId>crx</groupId>

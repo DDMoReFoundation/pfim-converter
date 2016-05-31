@@ -22,7 +22,6 @@ import static crx.converter.engine.PharmMLTypeChecker.isCommonParameter;
 import static crx.converter.engine.PharmMLTypeChecker.isContinuousCovariate;
 import static crx.converter.engine.PharmMLTypeChecker.isCovariate;
 import static crx.converter.engine.PharmMLTypeChecker.isDerivative;
-import static crx.converter.engine.PharmMLTypeChecker.isEstimation;
 import static crx.converter.engine.PharmMLTypeChecker.isFunction;
 import static crx.converter.engine.PharmMLTypeChecker.isFunctionCall;
 import static crx.converter.engine.PharmMLTypeChecker.isFunctionParameter;
@@ -44,11 +43,12 @@ import static crx.converter.engine.assoc.DependencyRef.updateDependencyContext;
 import static eu.ddmore.libpharmml.dom.dataset.ColumnType.ADM;
 import static eu.ddmore.libpharmml.dom.dataset.ColumnType.DOSE;
 import inserm.converters.pfim.parts.CovariateBlockImpl;
-import inserm.converters.pfim.parts.EstimationStepImpl;
 import inserm.converters.pfim.parts.ObservationBlockImpl;
+import inserm.converters.pfim.parts.OptimalDesignStepImpl;
 import inserm.converters.pfim.parts.ParameterBlockImpl;
 import inserm.converters.pfim.parts.StructuralBlockImpl;
 import inserm.converters.pfim.parts.TrialDesignBlockImpl;
+import inserm.converters.pfim.tree.TreeMaker_;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -77,10 +77,11 @@ import crx.converter.engine.assoc.DependencyLexer;
 import crx.converter.engine.assoc.DependencyRef;
 import crx.converter.engine.common.DataFiles;
 import crx.converter.engine.common.ObservationParameter;
+import crx.converter.engine.common.SimulationOutput;
 import crx.converter.engine.common.TabularDataset;
 import crx.converter.engine.common.TemporalDoseEvent;
-import crx.converter.spi.ILexer;
 import crx.converter.spi.IParser;
+import crx.converter.spi.OptimalDesignLexer;
 import crx.converter.spi.blocks.CovariateBlock;
 import crx.converter.spi.blocks.ObservationBlock;
 import crx.converter.spi.blocks.ParameterBlock;
@@ -89,6 +90,7 @@ import crx.converter.spi.blocks.TrialDesignBlock;
 import crx.converter.spi.blocks.VariabilityBlock;
 import crx.converter.spi.steps.BaseStep;
 import crx.converter.spi.steps.EstimationStep;
+import crx.converter.spi.steps.OptimalDesignStep_;
 import crx.converter.spi.steps.SimulationStep;
 import crx.converter.tree.BaseTreeMaker;
 import crx.converter.tree.BinaryTree;
@@ -158,9 +160,8 @@ import eu.ddmore.libpharmml.dom.modeldefn.VariabilityDefnBlock;
 import eu.ddmore.libpharmml.dom.modeldefn.VariabilityLevelDefinition;
 import eu.ddmore.libpharmml.dom.modeldefn.pkmacro.PKMacro;
 import eu.ddmore.libpharmml.dom.modeldefn.pkmacro.PKMacroList;
-import eu.ddmore.libpharmml.dom.modellingsteps.CommonModellingStep;
-import eu.ddmore.libpharmml.dom.modellingsteps.Estimation;
 import eu.ddmore.libpharmml.dom.modellingsteps.ModellingSteps;
+import eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignStep;
 import eu.ddmore.libpharmml.dom.trialdesign.ExternalDataSet;
 import eu.ddmore.libpharmml.dom.trialdesign.TrialDesign;
 import eu.ddmore.libpharmml.dom.uncertml.VarRefType;
@@ -173,7 +174,7 @@ import eu.ddmore.libpharmml.pkmacro.translation.Translator;
 /**
  * PFIM converter.
  */
-public class Converter extends DependencyLexer implements ILexer {
+public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	private static eu.ddmore.libpharmml.dom.commontypes.ObjectFactory cof = new eu.ddmore.libpharmml.dom.commontypes.ObjectFactory();
 	private static eu.ddmore.libpharmml.dom.dataset.ObjectFactory ds_of = new eu.ddmore.libpharmml.dom.dataset.ObjectFactory();
 	private static Manager m = new Manager();	
@@ -184,11 +185,6 @@ public class Converter extends DependencyLexer implements ILexer {
 	 * Converter name
 	 */
 	public static final String NAME = "PFIM";
-	
-	static {
-		EstimationStepImpl.setUseDefaultParameterEstimate(true);
-		EstimationStepImpl.setDefaultParameterEstimateValue(1.0);
-	}
 	
 	private static Piece addPiece(Piecewise block, boolean createCondition) {
 		Piece piece = null;
@@ -360,6 +356,7 @@ public class Converter extends DependencyLexer implements ILexer {
 		return ref;
 	}
 	
+	private boolean add_plotting_block = true;
 	private Version converterVersion = new VersionImpl(1, 7, 0);
 	private boolean created_parameter_context = false;
 	private StructuralBlock currentSb = null;
@@ -374,30 +371,26 @@ public class Converter extends DependencyLexer implements ILexer {
 	private Map<StructuralModel, MacroOutput> macro_output_map = new HashMap<StructuralModel, MacroOutput>();
 	private String model_filename = new String();
 	private String name = "Core Lexer";
+	private OptimalDesignStepImpl od_step = null;
 	private List<String> ordered_levels = new ArrayList<String>();
 	private String output_dir = ".";
 	private Map<PopulationParameter, ParameterContext> param_context_map = new HashMap<PopulationParameter, ParameterContext>();
 	private Parser parser;
 	private ParameterBlock pb = null;
-	private boolean permit_objective_ETAs = true;
 	private boolean permitEmptyTrialDesignBlock = false;
 	private boolean remove_illegal_chars = false, filter_reserved_words = false;
 	private IPharmMLResource res = null;
 	private boolean resetRegToCov = true;
+	private String run_id = null;
 	private boolean save_renamed_symbol_list = true;
 	private ScriptDefinition sd = new ScriptDefinition();
-	private boolean sort_parameter_model_by_context = false;
 	private boolean sort_structural_model = true;
 	private LanguageVersion source = null;
 	private LanguageVersion target = null;
 	private PharmMLVersion target_level = PharmMLVersion.V0_8_1;
-	private boolean terminate_with_duff_xml = false;
 	private Translator tr = new Translator();
 	private boolean translate_macros = true;
-	private boolean useGlobalConditionalDoseVariable = false;
 	private boolean usePiecewiseAsEvents = false;
-	private boolean validate_xml = false;
-	
 	private IValidationReport validation_report = null;
 	
 	public Converter() throws IOException, NullPointerException {
@@ -405,9 +398,8 @@ public class Converter extends DependencyLexer implements ILexer {
 		initLibrary();
 		
 		setUsePiecewiseAsEvents(true);
-		sort_parameter_model_by_context = true;
 		sort_structural_model = true;
-		tm = new BaseTreeMaker();
+		tm = new TreeMaker_();
 		name = NAME;
 		
 		// Register lexer/parser dependency.
@@ -482,13 +474,13 @@ public class Converter extends DependencyLexer implements ILexer {
 		parser.initialise();
 		if (outputDirectory == null) throw new NullPointerException("The output directroy is NULL");
 		
-		createFunctionTrees();  // Must be called first.
-		createVariabilityMap(); // Must be called second to load variability scope for parameters.
-		createObservationMap(); // Must be called after Function trees
+		createFunctionTrees();
+		createVariabilityMap();
+		createObservationMap();
 		createTrialDesignMaps();
 		createParameterMap();
 		createStepMap();
-		createStepTrees(); // Re-order so the column mappings established prior to structural block creation.
+		createStepTrees();
 		createStateMap();
 		createCovariateMap();
 		
@@ -496,14 +488,9 @@ public class Converter extends DependencyLexer implements ILexer {
 		createStructuralTrees();
 		createBlockTrees();
 		createCovariateTrees();
-		
-		if (permit_objective_ETAs) doObjectiveETAs();
-		sortElementOrdering();
 	}
 	
-	private void createBlockTrees() {
-		buildPartTrees(sd.getBlocksMap());
-	}
+	private void createBlockTrees() { buildPartTrees(sd.getBlocksMap()); }
 	
 	private void createCovariateMap() {
 		ModelDefinition def = dom.getModelDefinition();
@@ -516,13 +503,6 @@ public class Converter extends DependencyLexer implements ILexer {
 	}
 	
 	private void createCovariateTrees() { for (CovariateBlock cb : getCovariateBlocks()) cb.buildTrees(); }
-	
-	/**
-	 * Expose the estimation step constructor so that it can be replaced as necessary.<br/>
-	 * Allows a Lexer to slot in a replace Estimation step Constructor if the default step logic is too restrictive.
-	 * @return EstimationStep
-	 */
-	private EstimationStep createEstimationStep(Estimation est_) { return new EstimationStepImpl(est_, this); }
 	
 	/**
 	 * Pre-code generation parsing of any dose settings mapped to a input data column
@@ -594,6 +574,22 @@ public class Converter extends DependencyLexer implements ILexer {
 	}
 	
 	/**
+	 * Get list of exported variables associated with observation models.
+	 * @return List<VariableDefinition>
+	 */
+	public List<VariableDefinition> getExportedLocalVariables() {
+		List<VariableDefinition> exported_variables = new ArrayList<VariableDefinition>();
+		for (ObservationBlock ob : getObservationBlocks()) {
+			if (ob == null) continue;
+			
+			for (SimulationOutput output : ob.getSimulationOutputs()) 
+				if (isLocalVariable(output.v)) exported_variables.add((VariableDefinition) output.v);
+		}
+		
+		return exported_variables;
+	}
+	
+	/**
 	 * Create a parameter block
 	 * @param pmt Parent parameter block
 	 * @return ParameterBlock
@@ -644,9 +640,8 @@ public class Converter extends DependencyLexer implements ILexer {
 		return new LanguageVersionImpl("PharmML", preferred_pharmml_version);
 	}
 	
-	// TODO: More processing logic may need to included in this method.
 	private void createPKPDScript(PrintWriter fout, File src, File outputDirectory) throws IOException {
-		parser.writeSTDIN();
+		//parser.writeSTDIN();
     }
 	
 	private File createScript(File src, File outputDirectory) throws Exception {
@@ -698,25 +693,21 @@ public class Converter extends DependencyLexer implements ILexer {
 	private void createStepMap() {
 		if (dom == null) return;
 		
+		
 		ModellingSteps steps_ = dom.getModellingSteps();
+		
 		TrialDesign td = dom.getTrialDesign();
 		
 		if (steps_ == null) throw new IllegalStateException("The PharmML file does not have the required 'ModellingSteps' section.");
 		if (td == null) throw new NullPointerException("Model trial design is not specified.");
 		
-		// Parse for estimations first and then simulations.
-		for (JAXBElement<? extends CommonModellingStep> o : steps_.getCommonModellingStep()) {
-			CommonModellingStep step = o.getValue();
-			if (step == null) continue;
-			if (isEstimation(step)) {
-				Estimation est_step = (Estimation) step;
-				if (est_step.getOid() == null) throw new IllegalStateException("Estimation step OID cannot be NULL");
-				sd.getStepsMap().put(est_step.getOid(), createEstimationStep(est_step));
-			} 
-		} 
-		
+		List<OptimalDesignStep> od_steps = steps_.getListOfOptimalDesignStep();
+		if (od_steps == null) throw new NullPointerException("Optimal design task not found");
+		if (od_steps.isEmpty()) throw new IllegalStateException("An optimal design step not specified");
+	
+		od_step = new OptimalDesignStepImpl(od_steps.get(0), this);
 	}
-
+	
 	private void createStepTrees() { buildPartTrees(sd.getStepsMap()); }
 	
 	private StructuralBlock createStructuralBlock(StructuralModel sm) { return new StructuralBlockImpl(sm, this); }
@@ -771,23 +762,7 @@ public class Converter extends DependencyLexer implements ILexer {
 			sd.getVariabilityBlocks().add(vb);
 		}
 	}
-
-	private void doObjectiveETAs() {
-		List<ObservationBlock> obs = sd.getObservationBlocks();
-		ParameterBlock pm = getParameterBlock();
-		
-		for (ObservationBlock ob : obs) {
-			if (ob == null) continue;
-			if (ob.hasIndividualParameters()) {
-				for (IndividualParameter ip : ob.getIndividualParameters()) {
-					if (ip == null) continue;
-					pm.addIndividualParameter(ip);
-				}
-				setMixedEffect(true);
-			}
-		}
-	}
-
+	
 	private void doParameterContext_CovariateRelation(List<CovariateRelation> covs) {
 		if (covs == null) return;
 		if (covs.isEmpty()) return;
@@ -822,7 +797,7 @@ public class Converter extends DependencyLexer implements ILexer {
 			}
 		}
 	}
-	
+
 	private void doParameterContext_LinearCovariate(LinearCovariate lc) {
 		if (lc == null) return;
 		
@@ -1025,12 +1000,7 @@ public class Converter extends DependencyLexer implements ILexer {
 	}
 	
 	@Override
-	public EstimationStep getEstimationStep() {
-		for (Object o : sd.getStepsMap().values()) 
-			if (o instanceof EstimationStepImpl) return (EstimationStep) o;
-			
-		return null;
-	}
+	public EstimationStep getEstimationStep() { throw new UnsupportedOperationException(); }
 	
 	/**
 	 * Generate a conversion report with an exception
@@ -1091,7 +1061,7 @@ public class Converter extends DependencyLexer implements ILexer {
 		
 		return name;
 	}
-
+	
 	@Override
 	public Integer getModelParameterIndex(String name) {
 		Integer idx = -1;
@@ -1100,7 +1070,7 @@ public class Converter extends DependencyLexer implements ILexer {
 		}
 		return idx;
 	}
-	
+
 	@Override
 	// Return zero index by default.
 	public List<PopulationParameter> getModelParameters() {
@@ -1130,6 +1100,8 @@ public class Converter extends DependencyLexer implements ILexer {
 		
 		return op;
 	}
+	
+	public OptimalDesignStepImpl getOptimalDesignStepRef() { return od_step; }
 	
 	@Override
 	//  Overriding this method in case Java generates Windows style file paths that 'R' does not like.
@@ -1241,8 +1213,18 @@ public class Converter extends DependencyLexer implements ILexer {
 	}
 	
 	@Override
-	public Integer getStateVariableIndex(String name) { throw new UnsupportedOperationException(); }
-	
+	public Integer getStateVariableIndex(String name) {
+		Integer idx = -1;
+				
+		PharmMLRootType element = accessor.fetchElement(name);
+		if (element == null) return idx;
+			
+		StructuralBlock sb = getStrucuturalBlock();
+		idx = sb.getStateVariableIndex(name);
+					
+		return idx;
+	}
+ 
 	@Override
 	public List<StructuralBlock> getStructuralBlocks() { return sd.getStructuralBlocks(); }
 	
@@ -1281,7 +1263,11 @@ public class Converter extends DependencyLexer implements ILexer {
 	
 	@Override
 	public TreeMaker getTreeMaker() {
-		tm.setPermitDeclarationOnlyVariables(true);
+		if (tm == null) {
+			tm = new BaseTreeMaker();
+			tm.setPermitDeclarationOnlyVariables(true);
+		}
+		
 		return tm; 
 	}
 	
@@ -1405,11 +1391,9 @@ public class Converter extends DependencyLexer implements ILexer {
 	@Override
 	public boolean hasExternalDatasets() { return !data_files.getExternalDataSets().isEmpty(); }
 
-	private boolean add_plotting_block = true;
-	
 	@Override
 	public boolean hasPlottingBlock() { return add_plotting_block; }
-
+	
 	/**
 	 * Flag if the Lexer has adjustment an external dataset column usage declaration
 	 * from a Monolix (Regressor) to a NONMEM (covariate) setting.
@@ -1440,7 +1424,7 @@ public class Converter extends DependencyLexer implements ILexer {
 		
 		return false;
 	}
-	
+
 	@Override 
 	public boolean hasTrialDesign() { return getTrialDesign() != null; }
 	
@@ -1520,8 +1504,8 @@ public class Converter extends DependencyLexer implements ILexer {
 	public boolean isIsolatingDoseTimingVariable() { return isolate_dt; }
 	
 	@Override
-	public boolean isMixedEffect() { throw new UnsupportedOperationException(); }
-
+	public boolean isMixedEffect() { return false; }
+	
 	@Override
 	public boolean isModelParameter(String name) {
 		boolean isPopulationParameter = false;
@@ -1557,14 +1541,12 @@ public class Converter extends DependencyLexer implements ILexer {
 
 	@Override
 	public boolean isPermitEmptyTrialDesignBlock() { return permitEmptyTrialDesignBlock; }
-	
+
 	@Override
 	public boolean isRemoveIllegalCharacters() { return remove_illegal_chars; }
 	
 	@Override
 	public boolean isSaveSimulationOutput() { throw new UnsupportedOperationException();}
-	
-	
 	
 	@Override
 	public boolean isStateVariable(String name) {
@@ -1580,6 +1562,8 @@ public class Converter extends DependencyLexer implements ILexer {
 		
 		return isState;
 	}
+	
+	
 	
 	@Override
 	public boolean isStructuralBlockWithDosing(StructuralBlock sb) { throw new UnsupportedOperationException(); }
@@ -1601,7 +1585,7 @@ public class Converter extends DependencyLexer implements ILexer {
 	}
 	
 	@Override
-	public boolean isUseGlobalConditionalDoseVariable() { return useGlobalConditionalDoseVariable; }
+	public boolean isUseGlobalConditionalDoseVariable() { throw new UnsupportedOperationException(); }
 	
 	@Override
 	public boolean isUsePiecewiseAsEvents() { return usePiecewiseAsEvents; }
@@ -1625,14 +1609,7 @@ public class Converter extends DependencyLexer implements ILexer {
 		model_filename = xml_file_path.getAbsolutePath();
 		parser.setPharmMLWrittenVersion(dom.getWrittenVersion());
 		
-		if (validate_xml) {
-			validation_report = res.getCreationReport();
-			if (validation_report != null) {
-				if (!validation_report.isValid() && terminate_with_duff_xml) {
-					throw new IllegalStateException("The XML of the PharmML input model is not well-formed and valid.");
-				}
-			}
-		}
+		
 		
 		translatePKMacros();
 		resetRegressorToCovariate();
@@ -1643,6 +1620,8 @@ public class Converter extends DependencyLexer implements ILexer {
     public ConversionReport performConvert(File src, File outputDirectory) {
         getScriptDefinition().flushAllSymbols();
         try {
+        	if (run_id != null) parser.setRunId(run_id);
+			else parser.setRunId(m.generateRunId());
             parser.setRunId(m.generateRunId());
             setOutputDirectory(outputDirectory);
             loadPharmML(src);
@@ -1657,9 +1636,7 @@ public class Converter extends DependencyLexer implements ILexer {
     }
 	
 	@Override
-	public void permitObjectiveETAs(boolean decision) {
-		permit_objective_ETAs = decision;
-	}
+	public void permitObjectiveETAs(boolean decision) { throw new UnsupportedOperationException(); }
 	
 	/**
 	 * Re-map the dose target post PK Macro translation.
@@ -1691,7 +1668,7 @@ public class Converter extends DependencyLexer implements ILexer {
 		} 
 		else throw new UnsupportedOperationException("Unrecognised target mapping context on a data column (name='" + cref.getColumnIdRef() + "')");
 	}
-
+	
 	private void remapDoseTarget(TabularDataset table, ColumnMapping mapping, List<MapType> maps) {
 		
 		if (mapping == null || maps == null || table == null) return;
@@ -1782,6 +1759,12 @@ public class Converter extends DependencyLexer implements ILexer {
 			}
 		}
 	}
+
+	/**
+	 * Set the accessor handle to a model.
+	 * @param a Accessor handle
+	 */
+	public void setAccessor(Accessor a) { accessor = a; }
 	
 	@Override
 	public void setAddPlottingBlock(boolean decision) { }
@@ -1868,7 +1851,7 @@ public class Converter extends DependencyLexer implements ILexer {
 	 * Set the run identifier for output file stem.
 	 * @param run_id_ Run Identifier
 	 */
-	public void setRunId(String run_id_) { throw new UnsupportedOperationException(); }
+	public void setRunId(String run_id_) { run_id = run_id_; }
 
 	@Override
 	public void setSaveRenamedSymbolList(boolean decision) { save_renamed_symbol_list = true; }
@@ -1886,7 +1869,7 @@ public class Converter extends DependencyLexer implements ILexer {
 	public void setSortParameterModelByClustering(boolean decision) { throw new UnsupportedOperationException(); }
 
 	@Override
-	public void setSortParameterModelByContext(boolean decision) { sort_parameter_model_by_context = decision; }
+	public void setSortParameterModelByContext(boolean decision) { throw new UnsupportedOperationException(); }
 	
 	@Override
 	public void setSortStructuralModel(boolean decision) { sort_structural_model = decision;	}
@@ -1898,230 +1881,29 @@ public class Converter extends DependencyLexer implements ILexer {
 	public void setSortVariabilityLevels(boolean decision) { throw new UnsupportedOperationException(); }
 
 	@Override
-	public void setTerminateWithInvalidXML(boolean decision) { terminate_with_duff_xml = decision; }
+	public void setTerminateWithInvalidXML(boolean decision) { throw new UnsupportedOperationException(); }
 
 	@Override
 	public void setTranslate(boolean decision) { translate_macros = decision; }
 
     @Override
 	public void setTranslator(Translator tr_) { if (tr_ != null) tr = tr_; }
+    
     @Override
 	public void setTreeMaker(TreeMaker tm) { if (tm != null) this.tm = tm; }
 
     @Override
-	public void setUseGlobalConditionalDoseVariable(boolean decision) { useGlobalConditionalDoseVariable = decision; }
+	public void setUseGlobalConditionalDoseVariable(boolean decision) { throw new UnsupportedOperationException(); }
 
     @Override
 	public void setUsePiecewiseAsEvents(boolean decision) { usePiecewiseAsEvents = decision; }
 
     @Override
-	public void setValidateXML(boolean decision) { validate_xml = decision; }
+	public void setValidateXML(boolean decision) { throw new UnsupportedOperationException(); }
 
     private void sortElementOrdering() throws NullPointerException, IOException { 
-		if (sort_parameter_model_by_context) sortParameterBlockByContext(getParameterBlock());
 		if (sort_structural_model) sortStructuralBlock(getStrucuturalBlock());
 	}
-
-    private void sortParameterBlockByContext(ParameterBlock pb) throws NullPointerException, IOException { 
- 		createParameterContext();
- 		List<PharmMLRootType> old_list = new ArrayList<PharmMLRootType>();
- 		List<PharmMLRootType> new_list = new ArrayList<PharmMLRootType>();
-
- 		old_list.addAll(pb.getListOfDeclarations());
- 		
- 		List<DependencyRef> refs = new ArrayList<DependencyRef>();
- 		Map<Object, DependencyRef> dep_map = new HashMap<Object, DependencyRef>();
- 		for (PharmMLRootType o : old_list) {
- 			DependencyRef ref = new DependencyRef(o);
- 			BinaryTree bt = tm.newInstance(o);
- 			addDependency(ref, bt);
- 			
- 			List<NestedTreeRef> ntrefs = tm.getNestedTrees();
- 			for (NestedTreeRef ntref : ntrefs) addDependency(ref, ntref.bt);
- 			
- 			refs.add(ref);
- 			dep_map.put(o, ref);
- 		}
- 		
- 		for (int i = 0; i < refs.size(); i++) {
- 			DependencyRef ref = refs.get(i);
- 			if (ref.hasDependendsUpon()) {
- 				for (int j = 0; j < ref.getDependsUpon().size(); j++) {
- 					PharmMLElement depends_upon = ref.getDependsUpon().get(j);			
- 					DependencyRef other_ref = dep_map.get(depends_upon);
- 					if (other_ref != null) {
- 						if (other_ref.hasDependendsUpon()) {
- 							for (int k = 0; k < other_ref.getDependsUpon().size(); k++) {
- 								ref.addDependency(other_ref.getDependsUpon().get(k));
- 							}
- 						}
- 					}
- 				}
- 			}
- 		}
- 				
- 		List<PharmMLElement> elements_under_consideration = createElementsUnderConsideration(refs);
- 		if (elements_under_consideration.isEmpty()) return;
- 		updateDependencyContext(elements_under_consideration, refs);
-
- 		dep_map = new HashMap<Object, DependencyRef>(); 
- 		for (DependencyRef ref : refs) dep_map.put(ref.getElement(), ref);
-
- 		// Get the individuals first.
- 		// Use those to fix the parameter order in the 1st instance.
- 		List<IndividualParameter> ips = pb.getIndividualParameters();
- 		if (ips.size() > 0) {
- 			old_list.removeAll(ips);
-
- 			// Assign the primary THETAs first.
- 			for (IndividualParameter ip : ips) {
- 				if (ip == null) continue;
- 				DependencyRef ref = dep_map.get(ip);
- 				if (ref == null) continue;
-
- 				List<PharmMLElement> depends_upon = ref.getDependsUpon();
- 				for (PharmMLElement o : depends_upon) {
- 					if (isPopulationParameter(o)) {
- 						PopulationParameter p = (PopulationParameter) o;
- 						ParameterContext ctx = getParameterContext(p);
- 						if (ctx == null) continue;
- 						if (ctx.theta) {
- 							if (!new_list.contains(p)) new_list.add(p);
- 							if (old_list.contains(p)) old_list.remove(p);
- 						}
- 					}
- 				}
- 			}
- 		}
-
- 		// Add the Error model scoped THETAs (if any).
- 		List<PharmMLElement> elements_to_remove = new ArrayList<PharmMLElement>();
- 		for (PharmMLRootType o : old_list) {
- 			if (isPopulationParameter(o)) {
- 				PopulationParameter p = (PopulationParameter) o;
- 				ParameterContext ctx = getParameterContext(p);
- 				if (ctx.error_model) {
- 					if (!new_list.contains(p)) new_list.add(p);
- 					if (!elements_to_remove.contains(p)) elements_to_remove.add(p);
- 				}
- 			}
- 		}
- 		if (!elements_to_remove.isEmpty()) {
- 			old_list.removeAll(elements_to_remove);
- 			elements_to_remove.clear();
- 		}
-
- 		// Added the fixed effect linked THETAs (if any)
- 		if (ips.size() > 0) {
- 			for (IndividualParameter ip : ips) {
- 				if (ip == null) continue;
- 				DependencyRef ref = dep_map.get(ip);
- 				if (ref == null) continue;
-
- 				List<PharmMLElement> depends_upon = ref.getDependsUpon();
- 				for (PharmMLElement o : depends_upon) {
- 					if (isPopulationParameter(o)) {
- 						PopulationParameter p = (PopulationParameter) o;
- 						ParameterContext ctx = getParameterContext(p);
- 						if (ctx == null) continue;
- 						if (ctx.theta_fixed_effect) {
- 							if (!new_list.contains(p)) new_list.add(p);
- 							if (old_list.contains(p)) old_list.remove(p);
- 						}
- 					}
- 				}
- 			}
- 		}
-
- 		// Add the OMEGAs
- 		if (ips.size() > 0) {
- 			for (IndividualParameter ip : ips) {
- 				if (ip == null) continue;
- 				DependencyRef ref = dep_map.get(ip);
- 				if (ref == null) continue;
-
- 				List<PharmMLElement> depends_upon = ref.getDependsUpon();
- 				for (PharmMLElement o : depends_upon) {
- 					if (isPopulationParameter(o)) {
- 						PopulationParameter p = (PopulationParameter) o;
- 						ParameterContext ctx = getParameterContext(p);
- 						if (ctx == null) continue;
- 						if (ctx.omega) {
- 							if (!new_list.contains(p)) new_list.add(p);
- 							if (old_list.contains(p)) old_list.remove(p);
- 						}
- 					}
- 				}
- 			}
- 		}
-
- 		// Add the ETAs (if any).
- 		if (ips.size() > 0) {
- 			for (IndividualParameter ip : ips) {
- 				if (ip == null) continue;
- 				DependencyRef ref = dep_map.get(ip);
- 				if (ref == null) continue;
- 				List<PharmMLElement> depends_upon = ref.getDependsUpon();
- 				for (PharmMLElement o : depends_upon) {
- 					if (isRandomVariable(o)) {
- 						if (!new_list.contains(o)) new_list.add((PharmMLRootType) o);
- 						if (old_list.contains(o)) old_list.remove(o);
- 					}
- 				}
- 			}
- 		}
-
- 		// Main PK study terms.
- 		if (ips.size() > 0) {
- 			for (IndividualParameter ip : ips) {
- 				if (!new_list.contains(ip)) new_list.add((PharmMLRootType) ip);
- 				if (old_list.contains(ip)) old_list.remove(ip);
- 			}
- 		}
-
- 		// Bolt on any remaining, sorting by dependency not the usual ETA, THETA, OMEGA nonsense.
- 		if (old_list.size() == 1) {
- 			new_list.addAll(old_list);
- 			old_list.clear();
- 		} else if (old_list.size() > 1) {
- 			refs.clear();
- 			for (PharmMLRootType o : old_list) {
- 				if (o == null) continue;
- 				DependencyRef ref = dep_map.get(o);
- 				if (ref != null) if (!refs.contains(ref)) refs.add(ref);
- 			}
-
- 			elements_under_consideration = createElementsUnderConsideration(refs);
- 			if (!elements_under_consideration.isEmpty()) {
- 				updateDependencyContext(elements_under_consideration, refs);
- 				DependencyGraph g = new DependencyGraph(refs);
- 				g.createVertices();
- 				int edgeCount = g.createEdges();
- 				if (edgeCount > 0) {
- 					g.sort();
- 					List<PharmMLElement> ordered_variables = g.getSortedElements();
- 					for (PharmMLElement o : ordered_variables) {
- 						if (!new_list.contains(o)) new_list.add((PharmMLRootType) o); 
- 						if (old_list.contains(o)) old_list.remove(o);
- 					}
- 				}
- 			}
-
- 			// Tag on any remaining
- 			if (!old_list.isEmpty()) {
- 				for (PharmMLRootType o : old_list) if (!new_list.contains(o)) new_list.add(o);
- 			}
- 		}
-
- 		List<PharmMLElement> ordered_variables = new ArrayList<PharmMLElement>(); 
- 		ordered_variables.addAll(new_list);
- 		pb.setOrderedVariableList(ordered_variables);
-
- 		if (hasEstimation()) {
- 			EstimationStep est = getEstimationStep();
- 			if (est != null) est.update();
- 		}
- 	}
 
     private void sortStructuralBlock(StructuralBlock sb) throws NullPointerException, IOException {
 		if (sb == null) return;
@@ -2179,11 +1961,7 @@ public class Converter extends DependencyLexer implements ILexer {
 		sb.setOrderedVariableList(ordered_variables);
 	}
 
-    @Override
-    public String toString() {
-        return String.format("PharmMLToNMTRANConverter [source=%s, target=%s, converterVersion=%s]", source, target, converterVersion);
-    }
-    
+
     /**
 	 * Function called to translate PK macros.<br/>
 	 * Override to change application logic.
@@ -2262,4 +2040,7 @@ public class Converter extends DependencyLexer implements ILexer {
 
 	@Override
 	public boolean useCachedDependencyList() { throw new UnsupportedOperationException(); }
+
+	@Override
+	public OptimalDesignStep_ getOptimalDesignStep() { return od_step; }
 }
