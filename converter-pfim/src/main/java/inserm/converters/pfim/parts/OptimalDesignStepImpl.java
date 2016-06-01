@@ -37,6 +37,7 @@ import crx.converter.tree.TreeMaker;
 import eu.ddmore.libpharmml.dom.commontypes.PharmMLRootType;
 import eu.ddmore.libpharmml.dom.commontypes.RealValue;
 import eu.ddmore.libpharmml.dom.commontypes.SymbolRef;
+import eu.ddmore.libpharmml.dom.modeldefn.IndividualParameter;
 import eu.ddmore.libpharmml.dom.modeldefn.PopulationParameter;
 import eu.ddmore.libpharmml.dom.modellingsteps.InitialEstimate;
 import eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignOpType;
@@ -150,10 +151,11 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 					} else {					
 						lexer.addStatement(p, tm.newInstance(p));
 						lexer.updateNestedTrees(); 
-						params_to_estimate.add(p);
 					}
+					
+					params_to_estimate.add(p);
 				}
-
+				
 				for (FixedParameter fp : fixed_parameters) param_list.remove(fp.pe);
 			}
 		}
@@ -296,6 +298,16 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 	 */
 	public boolean isEvaluation() { return evaluation; }
 
+	@Override
+	public boolean isFixed(IndividualParameter ip) {
+		if (ip == null) return false;
+		
+		if (ip.getStructuredModel() != null) return false;
+		else if (ip.getAssign() != null) return true;
+		
+		return false;
+	}
+	
 	/**
 	 * Flag if an optimisation task.
 	 * @return boolean

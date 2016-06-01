@@ -17,20 +17,20 @@
 package inserm.converters.pfim;
 
 /**
- * Format for the output FIM
+ * Trand options for PFIM
  */
-public enum OutputFIMFormat {
-	BLOCK_DIAGONAL_FIM("1"),
-	COMPLETE_FIM("2");
+public enum RandomEffectModelOption {
+	ADDITIVE("1"),
+	EXPONENTIAL("2");
 	
-	public static  OutputFIMFormat fromValue(String value){
-		for(OutputFIMFormat item : values()) if (item.toString().equals(value)) return item;
+	public static  RandomEffectModelOption fromValue(String value){
+		for(RandomEffectModelOption item : values()) if (item.toString().equals(value)) return item;
 		throw new IllegalArgumentException("Unknown enum type \""+ value+ "\".");
 	}
 	
 	private String value;
 	
-	private OutputFIMFormat(String value_){ value = value_; }
+	private RandomEffectModelOption(String value_){ value = value_; }
 	
 	@Override
 	public String toString(){ return value; }
