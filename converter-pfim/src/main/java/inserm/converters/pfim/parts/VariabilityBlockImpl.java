@@ -41,7 +41,8 @@ import eu.ddmore.libpharmml.dom.modeldefn.VariabilityLevelDefinition;
  */
 public class VariabilityBlockImpl extends PartImpl implements VariabilityBlock  {
 	private Map<String, StringValue> comparator_map = new HashMap<String, StringValue>();
-	private boolean is_parameter_variability = false, residual_error = false;
+	private boolean parameter_variability = false;
+	private boolean residual_error = false;
 	private Map<String, String> level_dependency_map = new HashMap<String, String>();
 	private List<String> symbols = new ArrayList<String>();
 	private VariabilityDefnBlock vb = null;
@@ -58,7 +59,7 @@ public class VariabilityBlockImpl extends PartImpl implements VariabilityBlock  
 		lexer = lexer_;
 		Variability type = vb.getType();
 		
-		if (type == Variability.PARAMETER_VARIABILITY) is_parameter_variability = true;
+		if (type == Variability.PARAMETER_VARIABILITY) parameter_variability = true;
 		else if (type == Variability.RESIDUAL_ERROR) residual_error = true;
 		else throw new UnsupportedOperationException("Variability not supported (" + type + ")");
 		
@@ -187,7 +188,7 @@ public class VariabilityBlockImpl extends PartImpl implements VariabilityBlock  
 	 * Flag if block linked to parameter variability scope, i.e. individual random things.
 	 * @return boolean
 	 */
-	public boolean isParameterVariability() { return is_parameter_variability; }
+	public boolean isParameterVariability() { return parameter_variability; }
 	
 
 	/**

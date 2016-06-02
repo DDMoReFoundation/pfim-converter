@@ -153,7 +153,6 @@ public class Parser extends BaseParser {
 	private double current_offset = 0.0;
 	private Map<ArmDefinition, String> dosing_vector_map = new HashMap<ArmDefinition, String>();
 	private FIMtype fim_type = FIMtype.P;
-	private Double hmax = 1E-08;
 	private String leftArrayBracket = null;
 	private OutputFIMFormat option = OutputFIMFormat.BLOCK_DIAGONAL_FIM;
 	private String output_state_vector_symbol = "yd";
@@ -172,7 +171,6 @@ public class Parser extends BaseParser {
 	private String stdoutFilename = pfimStdoutFilename;
 	private RandomEffectModelOption trand = RandomEffectModelOption.EXPONENTIAL;
 	private boolean writtenSTDIN = false;
-	
 	private boolean wrotePFIM_R = false;
 	
 	/**
@@ -593,10 +591,10 @@ public class Parser extends BaseParser {
 		setRunId("call_run");
 	}
 	
-	private boolean is_parameter_scope(ParameterRandomVariable eps) {
-		if (eps == null) return false;
+	private boolean is_parameter_scope(ParameterRandomVariable eta) {
+		if (eta == null) return false;
 		
-		LevelReference lref = eps.getListOfVariabilityReference().get(0);
+		LevelReference lref = eta.getListOfVariabilityReference().get(0);
 		if (lref != null) {
 			VariabilityBlock vb = lexer.getVariabilityBlock(lref.getSymbRef());
 			if (vb != null) return vb.isParameterVariability();
@@ -725,6 +723,8 @@ public class Parser extends BaseParser {
 		PharmMLRootType element = a.fetchElement(ref);
 		if (!isRandomVariable(element)) return omega;
 		ParameterRandomVariable rv = (ParameterRandomVariable) element;
+		if (!is_parameter_scope(rv)) 
+			throw new IllegalStateException("Random variable does not have the required parameter variability scope (name='" + rv.getSymbId() + "')");
 		
 		// Just assuming probonto and normal usage, nothing else.
 		Distribution dist = rv.getDistribution();
@@ -1449,7 +1449,7 @@ public class Parser extends BaseParser {
 		String format = "%s<-%s\n";
 		fout.write(String.format(format, "RtolEQ", rtol));
 		fout.write(String.format(format, "AtolEQ", atol));
-		fout.write(String.format(format, "Hmax", hmax));
+		fout.write(String.format(format, "Hmax", "Inf"));
 	}
 	
 	/**
@@ -1493,10 +1493,72 @@ public class Parser extends BaseParser {
 		writeProt(fout);
 		writeSubjects(fout);
 		writeSubjectsInput(fout);
-		
+		writeGraphLogical(fout);
+		writeGraphSensiLogical(fout);
+		writeNamesDataX(fout);
+		writeNamesDataY(fout);
+		writeLogLogical(fout);
+		writeGraphInf(fout);
+		writeGraphSup(fout);
+		writeYRange(fout);
 		fout.close();
 		
 		writtenSTDIN = true;
+	}
+	
+	private void writeYRange(PrintWriter fout) {
+		if (fout == null) return;
+		String format = "y.rangeA<-NULL\n";
+		fout.write(format);
+	}
+	
+	private void writeGraphInf(PrintWriter fout) {
+		if (fout == null) return;
+		String format = "graph.infA<-c(0)\n";
+		fout.write(format);
+	}
+	
+	private void writeGraphSup(PrintWriter fout) {
+		if (fout == null) return;
+		
+		double max_time = 0.0;
+		for (double time : recorded_vector_values) if (time > max_time) max_time = time;
+		
+		String format = "graph.supA<-c(%s)\n";
+		fout.write(String.format(format, max_time));
+	}
+	
+	private void writeLogLogical(PrintWriter fout) {
+		if (fout == null) return;
+		String format = "log.logical<-F\n";
+		fout.write(format);
+	}
+	
+	private void writeNamesDataY(PrintWriter fout) {
+		if (fout == null) return;
+		String yLabel = "Amount";
+		
+		Converter c = (Converter) lexer;
+		List<VariableDefinition> exported_locals = c.getExportedLocalVariables();
+		if (!exported_locals.isEmpty()) yLabel = z.get(exported_locals.get(0));
+		
+		String format = "names.datay<-c(\"%s\")\n";
+		fout.write(String.format(format, yLabel));
+	}
+		
+	private void writeNamesDataX(PrintWriter fout) {
+		if (fout == null) return;
+		fout.write("names.datax<-c(\"Time\")\n");
+	}
+	
+	private void writeGraphSensiLogical(PrintWriter fout) {
+		if (fout == null) return;
+		fout.write("graphsensi.logical<-F\n");
+	}
+	
+	private void writeGraphLogical(PrintWriter fout) {
+		if (fout == null) return;
+		fout.write("graph.logical<-T\n");
 	}
 	
 	private void writeTimeCondInit(PrintWriter fout) {

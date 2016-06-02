@@ -77,7 +77,6 @@ public class StructuralBlockImpl extends PartImpl implements StructuralBlock, Or
 	private List<PKMacro> macro_list = null;
 	private MacroOutput macro_output = null;
 	private List<PopulationParameter> params = new ArrayList<PopulationParameter>();
-	 
 	private StructuralModel sm = null;
 	private Map<CommonVariableDefinition, Integer> state_map_idx = new HashMap<CommonVariableDefinition, Integer>();
 	private Map<String, CommonVariableDefinition> state_map_name = new HashMap<String, CommonVariableDefinition>();
