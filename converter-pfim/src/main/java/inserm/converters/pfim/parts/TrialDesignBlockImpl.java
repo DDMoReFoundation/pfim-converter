@@ -17,6 +17,7 @@
 package inserm.converters.pfim.parts;
 
 import static crx.converter.engine.PharmMLTypeChecker.isBolus;
+import static crx.converter.engine.PharmMLTypeChecker.isObservation;
 import static crx.converter.engine.Utils.getClassName;
 
 import java.util.ArrayList;
@@ -44,6 +45,9 @@ import eu.ddmore.libpharmml.dom.trialdesign.DosingRegimen;
 import eu.ddmore.libpharmml.dom.trialdesign.DosingVariable;
 import eu.ddmore.libpharmml.dom.trialdesign.InterventionSequence;
 import eu.ddmore.libpharmml.dom.trialdesign.Interventions;
+import eu.ddmore.libpharmml.dom.trialdesign.Observation;
+import eu.ddmore.libpharmml.dom.trialdesign.ObservationSequence;
+import eu.ddmore.libpharmml.dom.trialdesign.Observations;
 import eu.ddmore.libpharmml.dom.trialdesign.TrialDesign;
 
 /**
@@ -62,16 +66,20 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 		}
 	}
 	
-	private Map<String, ArmDefinition> arm_map = new HashMap<String, ArmDefinition>(); 
+	private Map<ArmDefinition,String> arm_2_observation_map = new  HashMap<ArmDefinition,String>(); 
+	private Map<String, ArmDefinition> arm_map = new HashMap<String, ArmDefinition>();
+	private Map<ArmDefinition,Double> arm_observation_start_map = new  HashMap<ArmDefinition,Double>();
 	private Map<String, Integer> arm_size_map = new HashMap<String, Integer>();
 	private List<ArmDefinition> arms = new ArrayList<ArmDefinition>();
 	private Object ctx = new Object();
 	private Map<String, String> dose_stmt_map = new HashMap<String, String>();
 	private Map<String, PharmMLRootType> dose_target_map = new HashMap<String, PharmMLRootType>();
 	private Map<String, Double> dose_time_raw = new HashMap<String, Double>();
-	private Map<String, InterventionSequenceRef> iseq_map = new HashMap<String, InterventionSequenceRef>();
+	private Map<String, InterventionSequenceRef> iseq_map = new HashMap<String, InterventionSequenceRef>(); 
+	private List<Observation> obs = new ArrayList<Observation>();
+	private Map<String, Observation> obs_map = new HashMap<String, Observation>();
 	private IParser p = null;
-	private TrialDesign td = null; 
+	private TrialDesign td = null;
 	private TreeMaker tm = null;
 	
 	/**
@@ -96,8 +104,7 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 		String oid = arm.getOid();
 		if (oid == null) throw new NullPointerException("Arm identifier is NULL");
 		if (!arm_map.containsKey(oid)) arm_map.put(oid, arm);
-	}
-	
+	} 
 	private void buildArms() {
 		Arms arm_list = td.getArms();
 		if (arm_list == null) return;
@@ -106,8 +113,9 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 			if (arm == null)  continue;
 			arms.add(arm);
 			addArm(arm);
-			processArmSize(arm);
-			processArmInterventionSequence(arm);
+			processSize(arm);
+			processInterventionSequence(arm);
+			processObservationSequence(arm);
 		}
 	}
 	
@@ -125,10 +133,29 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 			if (isBolus(regimen)) processBolus(oid, (Bolus) regimen);
 			else throw new UnsupportedOperationException("Unsupported dosing regimen (class='" + getClassName(regimen) + "'");
 		}
+	} 
+	
+	private void buildObservations() {
+		Observations observations = td.getObservations();
+		if (observations == null) return;
+		for (PharmMLRootType element : observations.getListOfObservationsElements()) {
+			if (isObservation(element)) {
+				Observation ob = (Observation) element;
+				String oid = ob.getOid();
+				if (oid == null) throw new NullPointerException("The observation OID is NULL");
+				if (obs_map.containsKey(oid)) throw new IllegalStateException("An observation OID is not unique (oid='" + oid + "')");
+				obs.add(ob);
+				obs_map.put(oid, ob);
+				
+				lexer.addStatement(ob.getObservationTimes(), tm.newInstance(ob.getObservationTimes()));
+				lexer.updateNestedTrees();
+			}
+		}
 	}
 	
 	@Override
 	public void buildTrees() {
+		buildObservations();
 		buildInterventions();
 		buildArms();
 	}
@@ -145,17 +172,16 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 	}
 	
 	@Override
-	public int getArmCount() { return arms.size(); } 
+	public int getArmCount() { return arms.size(); }
 	
 	@Override
-	public List<ArmDefinition> getArms() { return arms; }
+	public List<ArmDefinition> getArms() { return arms; };
 	
 	@Override
 	public int getArmSize(String oid) {
 		if (oid == null) return 0;
 		int size = 0;
 		if (arm_size_map.containsKey(oid)) size = arm_size_map.get(oid);
-		
 		return size;
 	}
 	
@@ -164,7 +190,7 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 		if (administration_oid == null) return null;
 		if (dose_stmt_map.containsKey(administration_oid)) return dose_stmt_map.get(administration_oid);
 		else return null;
-	}
+	} 
 	
 	@Override
 	public PharmMLRootType getDoseTarget(String administration_oid) {
@@ -194,6 +220,52 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 	@Override
 	public String getName() { return "trial_design"; }
 	
+	/**
+	 * Get the observation linked to the Arm.
+	 * @param arm Arm Instance
+	 * @return Observation
+	 */
+	public Observation getObservation(ArmDefinition arm) {
+		if (arm == null) return null;
+		if (arm_2_observation_map.containsKey(arm)) {
+			String ob_oid = arm_2_observation_map.get(arm);
+			return this.getObservation(ob_oid);
+		}
+		
+		return null;
+	}
+	
+	/**
+	 * Get the named observation element
+	 * @param oid Observation Identifier
+	 * @return Observation
+	 */
+	public Observation getObservation(String oid) {
+		if (oid == null) return null;
+		else if (obs_map.containsKey(oid))  return obs_map.get(oid);
+		else return null;
+	}
+	
+	/**
+	 * Get list of declared observations.
+	 * @return
+	 */
+	public List<Observation> getObservations() { return obs; }
+	
+	/**
+	 * Get the start offset for an Arm
+	 * @param arm Arm Instance
+	 * @return double
+	 */
+	public double getObservationStart(ArmDefinition arm) {
+		double start = 0.0;
+		if (arm != null) {
+			if (arm_observation_start_map.containsKey(arm)) start = arm_observation_start_map.get(arm);
+		}
+		
+		return start;
+	}
+	
 	@Override
 	public List<DerivativeVariable> getStateVariablesWithDosing() { throw new UnsupportedOperationException(); }
 
@@ -214,7 +286,24 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 	@Override
 	public boolean hasSymbolId(String name) { return false; }
 	
-	private void processArmInterventionSequence(ArmDefinition arm) {
+	private void processBolus(String oid, Bolus bolus) {
+		if (oid == null || bolus == null) return;
+		
+		DosingVariable target = bolus.getDoseAmount();
+		if (target == null) throw new NullPointerException("Dose target not specified (oid='" + oid + "')");
+		Accessor a = lexer.getAccessor();
+		
+		PharmMLRootType element = a.fetchElement(target);
+		if (element == null) throw new NullPointerException("Dose target element not found in the model (oid='" + oid + "')");
+		dose_target_map.put(oid, element);
+		
+		// Assuming that the dose amount is an numeric quantity.
+		String stmt = stripOuterBrackets(p.parse(ctx, tm.newInstance(target)).trim());
+		dose_stmt_map.put(oid, stmt);
+		dose_time_raw.put(oid, Double.parseDouble(p.parse(ctx, tm.newInstance(bolus.getDosingTimes())).trim()));
+	}
+	
+	private void processInterventionSequence(ArmDefinition arm) {
 		if (arm == null) return;
 		String oid = arm.getOid();
 		if (oid == null) throw new NullPointerException("OID is undefined");
@@ -231,7 +320,23 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 		iseq_map.put(oid, new InterventionSequenceRef(oref, start));
 	}
 	
-	private void processArmSize(ArmDefinition arm) {
+	// As PFIM, assuming 1 observation sequence per arm.
+	private void processObservationSequence(ArmDefinition arm) {
+		if (arm == null) return;
+		ObservationSequence oseq = arm.getListOfObservationSequence().get(0);
+		if (oseq == null) return;
+		OidRef oref = oseq.getObservationList().getListOfObservationRef().get(0);
+		if (oref == null) return;
+		if (oref.getOidRef() == null) return;
+		arm_2_observation_map.put(arm, oref.getOidRef());
+		
+		Double start = 0.0;
+		if (oseq.getStart() != null) 
+			start = Double.parseDouble(p.parse(ctx, tm.newInstance(oseq.getStart())).trim());
+		arm_observation_start_map.put(arm, start);
+	}
+	
+	private void processSize(ArmDefinition arm) {
 		if (arm == null) return;
 		if (arm.getOid() == null) return;
 		
@@ -241,23 +346,6 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 		p = lexer.getParser();
 		Integer size  = Integer.parseInt(p.parse(ctx, tm.newInstance(size_expr)).trim());
 		arm_size_map.put(arm.getOid(), size);
-	}
-	
-	private void processBolus(String oid, Bolus bolus) {
-		if (oid == null || bolus == null) return;
-		
-		DosingVariable target = bolus.getDoseAmount();
-		if (target == null) throw new NullPointerException("Dose target not specified (oid='" + oid + "')");
-		Accessor a = lexer.getAccessor();
-		
-		PharmMLRootType element = a.fetchElement(target);
-		if (element == null) throw new NullPointerException("Dose target element not found in the model (oid='" + oid + "')");
-		dose_target_map.put(oid, element);
-		
-		// Assuming that the dose amount is an numeric quantity.
-		String stmt = stripOuterBrackets(p.parse(ctx, tm.newInstance(target)).trim());
-		dose_stmt_map.put(oid, stmt);
-		dose_time_raw.put(oid, Double.parseDouble(p.parse(ctx, tm.newInstance(bolus.getDosingTimes())).trim()));
 	}
 	
 	private String stripOuterBrackets(String stmt) {

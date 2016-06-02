@@ -35,6 +35,7 @@ import static crx.converter.engine.PharmMLTypeChecker.isReal;
 import static crx.converter.engine.PharmMLTypeChecker.isRhs;
 import static crx.converter.engine.PharmMLTypeChecker.isSequence;
 import static crx.converter.engine.PharmMLTypeChecker.isString;
+import static crx.converter.engine.PharmMLTypeChecker.isStructuredError;
 import static crx.converter.engine.PharmMLTypeChecker.isSymbolReference;
 import static crx.converter.engine.PharmMLTypeChecker.isTrue;
 import static crx.converter.engine.PharmMLTypeChecker.isUnaryOperation;
@@ -53,6 +54,7 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -70,9 +72,11 @@ import crx.converter.engine.SymbolReader.ModifiedSymbol;
 import crx.converter.engine.common.BaseParser;
 import crx.converter.engine.common.IndividualParameterAssignment;
 import crx.converter.spi.OptimalDesignLexer;
+import crx.converter.spi.blocks.ObservationBlock;
 import crx.converter.spi.blocks.ParameterBlock;
 import crx.converter.spi.blocks.StructuralBlock;
 import crx.converter.spi.blocks.TrialDesignBlock;
+import crx.converter.spi.blocks.VariabilityBlock;
 import crx.converter.spi.steps.OptimalDesignStep_;
 import crx.converter.tree.BinaryTree;
 import crx.converter.tree.Node;
@@ -83,6 +87,7 @@ import eu.ddmore.libpharmml.dom.commontypes.BooleanValue;
 import eu.ddmore.libpharmml.dom.commontypes.DerivativeVariable;
 import eu.ddmore.libpharmml.dom.commontypes.InitialCondition;
 import eu.ddmore.libpharmml.dom.commontypes.IntValue;
+import eu.ddmore.libpharmml.dom.commontypes.LevelReference;
 import eu.ddmore.libpharmml.dom.commontypes.PharmMLRootType;
 import eu.ddmore.libpharmml.dom.commontypes.RealValue;
 import eu.ddmore.libpharmml.dom.commontypes.Rhs;
@@ -103,18 +108,23 @@ import eu.ddmore.libpharmml.dom.maths.Piece;
 import eu.ddmore.libpharmml.dom.maths.Piecewise;
 import eu.ddmore.libpharmml.dom.modeldefn.Distribution;
 import eu.ddmore.libpharmml.dom.modeldefn.IndividualParameter;
+import eu.ddmore.libpharmml.dom.modeldefn.ObservationError;
 import eu.ddmore.libpharmml.dom.modeldefn.ParameterRandomEffect;
 import eu.ddmore.libpharmml.dom.modeldefn.ParameterRandomVariable;
 import eu.ddmore.libpharmml.dom.modeldefn.PopulationParameter;
 import eu.ddmore.libpharmml.dom.modeldefn.StructuredModel;
 import eu.ddmore.libpharmml.dom.modeldefn.StructuredModel.LinearCovariate;
 import eu.ddmore.libpharmml.dom.modeldefn.StructuredModel.LinearCovariate.PopulationValue;
+import eu.ddmore.libpharmml.dom.modeldefn.StructuredObsError;
+import eu.ddmore.libpharmml.dom.modeldefn.StructuredObsError.ErrorModel;
+import eu.ddmore.libpharmml.dom.modeldefn.StructuredObsError.ResidualError;
 import eu.ddmore.libpharmml.dom.modellingsteps.FIMtype;
 import eu.ddmore.libpharmml.dom.modellingsteps.ParameterEstimate;
 import eu.ddmore.libpharmml.dom.probonto.DistributionParameter;
 import eu.ddmore.libpharmml.dom.probonto.ParameterName;
 import eu.ddmore.libpharmml.dom.probonto.ProbOnto;
 import eu.ddmore.libpharmml.dom.trialdesign.ArmDefinition;
+import eu.ddmore.libpharmml.dom.trialdesign.Observation;
 import eu.ddmore.libpharmml.dom.uncertml.VarRefType;
 
 /**
@@ -128,8 +138,19 @@ public class Parser extends BaseParser {
 	private static final String pfimStdoutFilename = "stdout.out";
 	private static final String PREFERRED_SEPERATOR = "/";
 	
+	private static String toAlphabetic(int i) {
+	    if(i < 0) return "-"+ toAlphabetic(-i-1);
+	    
+	    int quot = i / 26;
+	    int rem = i % 26;
+	    char letter = (char)((int) 'A' + rem);
+	    if (quot == 0) return ""+letter;
+	    else return toAlphabetic(quot-1) + letter;
+	}
+	
 	private Double atol = 1E-08;
 	private Object ctx = new Object();
+	private double current_offset = 0.0;
 	private Map<ArmDefinition, String> dosing_vector_map = new HashMap<ArmDefinition, String>();
 	private FIMtype fim_type = FIMtype.P;
 	private Double hmax = 1E-08;
@@ -142,6 +163,8 @@ public class Parser extends BaseParser {
 	private String previousFIM = "";
 	private String programDirectory = ".";
 	private Properties props = null;
+	private boolean record_vector_values = false;
+	private List<Double> recorded_vector_values = new ArrayList<Double>();
 	private Map<IndividualParameter, PopulationParameter> referenced_params_map = new HashMap<IndividualParameter, PopulationParameter>();
 	private String rightArrayBracket = null;
 	private Double rtol = 1E-08;
@@ -149,6 +172,7 @@ public class Parser extends BaseParser {
 	private String stdoutFilename = pfimStdoutFilename;
 	private RandomEffectModelOption trand = RandomEffectModelOption.EXPONENTIAL;
 	private boolean writtenSTDIN = false;
+	
 	private boolean wrotePFIM_R = false;
 	
 	/**
@@ -198,6 +222,20 @@ public class Parser extends BaseParser {
 		return s.toString();
 	}
 	
+	private String cat_(List<Double> values) {
+		if (values == null) return "c()";
+		StringBuffer s = new StringBuffer("c(");
+		int i = 0;
+		for (Double value : values) {
+			if (value == null) continue;
+			if (i > 0) s.append(",");
+			s.append(value);
+			i++;
+		}
+		s.append(")");
+		return s.toString();
+	}
+	
 	private String doArrayAccess(String variableName, Integer idx) {
 		String format = "%s%s%s%s";
 		
@@ -207,7 +245,7 @@ public class Parser extends BaseParser {
 	}
 	
 	private String doBigInteger(BigInteger i) { return i.toString(); }
-	
+
 	private String doConstant(Constant c) {
 		String symbol = unassigned_symbol;
 		
@@ -219,13 +257,13 @@ public class Parser extends BaseParser {
 	
 		return symbol;
 	}
-
+		
 	private String doDerivative(DerivativeVariable s) {
 		Integer idx = lexer.getStateVariableIndex(s.getSymbId());
 		String format = "%s%s";
 		return String.format(format, output_state_vector_symbol, idx);
 	}
-		
+	
 	protected String doElement(JAXBElement<?> element) {
 		String symbol = unassigned_symbol;
 		
@@ -295,11 +333,11 @@ public class Parser extends BaseParser {
 		return i.getValue().toString();
 	}
 	
+	
 	private String doJavaBoolean(Boolean value) {
 		if (value) return doTrue();
 		else return doFalse();
 	}
-	
 	
 	/**
 	 * Write code for local variable reference.
@@ -445,7 +483,7 @@ public class Parser extends BaseParser {
 	private String doVector(Vector v) {
 		String symbol = unassigned_symbol;
 		
-		ArrayList<String> values = new ArrayList<String>();
+		List<String> values = new ArrayList<String>();
 		
 		VectorElements elements = v.getVectorElements();
 		if (elements == null) throw new NullPointerException("Vector elements are NULL.");
@@ -458,6 +496,8 @@ public class Parser extends BaseParser {
 				values.add(stmt);
 			}
 		}
+		
+		if (record_vector_values) recordVectorValues(values);
 		
 		StringBuilder st = new StringBuilder();
 		st.append("c(");
@@ -553,6 +593,30 @@ public class Parser extends BaseParser {
 		setRunId("call_run");
 	}
 	
+	private boolean is_parameter_scope(ParameterRandomVariable eps) {
+		if (eps == null) return false;
+		
+		LevelReference lref = eps.getListOfVariabilityReference().get(0);
+		if (lref != null) {
+			VariabilityBlock vb = lexer.getVariabilityBlock(lref.getSymbRef());
+			if (vb != null) return vb.isParameterVariability();
+		}
+		
+		return false;
+	}
+	
+	private boolean is_residual_scope(ParameterRandomVariable eps) {
+		if (eps == null) return false;
+		
+		LevelReference lref = eps.getListOfVariabilityReference().get(0);
+		if (lref != null) {
+			VariabilityBlock vb = lexer.getVariabilityBlock(lref.getSymbRef());
+			if (vb != null) return vb.isResidualError();
+		}
+		
+		return false;
+	}
+	
 	private boolean isPiecewiseFunctionArgument(FunctionArgument arg) {
 		if (arg == null) return false;
 		if (arg.getAssign() != null) {
@@ -577,6 +641,75 @@ public class Parser extends BaseParser {
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
+	}
+	
+	private void processErrorModel(int idx, ObservationBlock ob, PrintWriter fout) {
+		if (ob == null || fout == null) return;
+
+		Accessor a = lexer.getAccessor();
+		ObservationError error_model = ob.getObservationError();
+		if (!isStructuredError(error_model)) return;
+		StructuredObsError serr = (StructuredObsError) ob.getObservationError();
+		ErrorModel model = serr.getErrorModel();
+		if (model == null) return;
+
+		Rhs assign = model.getAssign();
+		if (assign == null) return;
+
+		Object content = assign.getContent();
+		if (!isFunctionCall(content)) throw new IllegalStateException("An error model does not define the expected function call.");
+
+		FunctionCallType call = (FunctionCallType) content;
+		String func_name = call.getSymbRef().getSymbIdRef();
+		if (!SupportedErrorModel.contains(func_name)) 
+			throw new UnsupportedOperationException("Error model not supported (type='" + func_name + "' )");
+
+		String inter = "0.0", slope = "0.0";
+		
+		OptimalDesignLexer c = (OptimalDesignLexer) lexer;
+		OptimalDesignStepImpl step = (OptimalDesignStepImpl) c.getOptimalDesignStep();
+		SupportedErrorModel model_flag = SupportedErrorModel.fromValue(func_name);
+		if (SupportedErrorModel.PROPORTIONAL.equals(model_flag)) {
+			inter = "0.0";
+			ResidualError re = serr.getResidualError();
+			if (re != null) {
+				PharmMLRootType element = a.fetchElement(re.getSymbRef());
+				if (!isRandomVariable(element)) throw new IllegalStateException("A model element referenced in a residual error is not a random variable");
+				ParameterRandomVariable eps = (ParameterRandomVariable) element;
+				if (!is_residual_scope(eps)) throw new IllegalStateException("Random variable does not have residual scope (name='" + eps.getSymbId() +  "')");
+
+				Distribution dist = eps.getDistribution();
+				if (dist != null) {
+					ProbOnto probo = dist.getProbOnto();
+					if (probo != null) {
+						for (DistributionParameter dp : probo.getListOfParameter()) {
+							if (dp == null) continue;
+							ParameterName name = dp.getName();
+							if (name == null) continue;
+							if (ParameterName.STDEV.equals(name)) {
+								content = dp.getAssign().getContent();
+								if (!isSymbolReference(content)) continue;
+								SymbolRef ref = (SymbolRef) content;
+								element = a.fetchElement(ref);
+								if (!isPopulationParameter(element)) continue;
+								PopulationParameter p = (PopulationParameter) element;
+
+								ParameterEstimate pe = step.getParameterEstimate(p);
+								if (pe == null) throw new NullPointerException("The expected parameter estimate is NULL");
+								slope = parse(ctx, lexer.getStatement(pe.getInitialEstimate())).trim();
+							}
+						}
+					}
+				}
+			}
+		}
+		
+		String label = toAlphabetic(idx);
+		String format = "sig.inter%s<-%s\n";
+		fout.write(String.format(format, label, inter));
+		
+		format = "sig.slope%s<-%s\n";
+		fout.write(String.format(format, label, slope));
 	}
 	
 	// Assuming a single random effect per IP instance.
@@ -622,6 +755,19 @@ public class Parser extends BaseParser {
 		}
 		
 		return omega;
+	}
+	
+	private void recordVectorValues(List<String> values) {
+		if (values == null) return;
+		for (String value : values) {
+			if (value == null) continue;
+			try {
+				Double d = Double.parseDouble(value);
+				recorded_vector_values.add(d + current_offset);
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		}
 	}
 	
 	public void removeAbsolutePaths(File f) throws IOException {
@@ -682,6 +828,10 @@ public class Parser extends BaseParser {
 	 */
 	public void setOutputFIMFilename(String filename) {
 		if (filename != null) outputFIMFilename = filename;
+	} 
+	private void setRecordVectorValues(boolean decision, double offset) {
+		record_vector_values = decision;
+		current_offset = offset;
 	}
 	
 	/**
@@ -782,7 +932,7 @@ public class Parser extends BaseParser {
 		if (fout == null) return;
 		fout.write("boundA<-list(c(0,Inf))\n");
 	}
-	
+
 	private void writeCondInitExpression(PrintWriter fout) {
 		if (fout == null) return;
 		StructuralBlock sb = lexer.getStrucuturalBlock();
@@ -885,12 +1035,33 @@ public class Parser extends BaseParser {
 		String format = "dose<-c(%s)\n";
 		fout.write(String.format(format, doses));
 	}
-
+	
+	private void writeErrorModelDerivedSettings(PrintWriter fout) {
+		List<ObservationBlock> obs = lexer.getObservationBlocks();
+		int i = 0;
+		for (ObservationBlock ob : obs) processErrorModel(i++, ob, fout);
+	}
+	
 	private void writeFIMType(PrintWriter fout) {
 		if (fout == null) return;
 		
 		String format = "FIM<-\"%s\"\n";
 		fout.write(String.format(format, fim_type));
+	}
+	
+	private void writeGamma(PrintWriter fout) {
+		if (fout == null) return;
+		
+		ParameterBlock pb = lexer.getParameterBlock();
+		TrialDesignBlock tdb = lexer.getTrialDesign();
+		
+		if (!tdb.hasOccassions()) {
+			List<String> values = new ArrayList<String>();
+			for (int i = 0; i < pb.getIndividualParameters().size(); i++) values.add("0.0");
+				
+			String format = "gamma<-diag(%s)\n";
+			fout.write(String.format(format, cat(values)));
+		}
 	}
 	
 	private void writeGraphOnly(PrintWriter fout) {
@@ -967,7 +1138,7 @@ public class Parser extends BaseParser {
 			fout.write("NUM<-F\n");
 			return;
 		}
-	}
+	} 
 	
 	private void writeNumberOfOccassions(PrintWriter fout) {
 		if (fout == null) return;
@@ -997,7 +1168,6 @@ public class Parser extends BaseParser {
 		
 		fout.write("}\n");
 	}
-	
 	private void writeODEModelFunctionReturnStatement(PrintWriter fout, StructuralBlock sb) {
 		if (fout == null || sb == null) return;
 		
@@ -1030,7 +1200,6 @@ public class Parser extends BaseParser {
 			fout.write(String.format(format, dv_array));
 		}
 	}
-	
 	private void writeOmega(PrintWriter fout) {
 		if (fout == null) return;
 		
@@ -1060,7 +1229,7 @@ public class Parser extends BaseParser {
 		if (fout == null) return;
 		String format = "option<-%s\n";
 		fout.write(String.format(format, option));
-	} 
+	}
 	
 	private void writeOutputFilename(PrintWriter fout) {
 		if (fout == null) return;
@@ -1073,7 +1242,7 @@ public class Parser extends BaseParser {
 		
 		String format = "outputFIM<-\"%s\"\n";
 		fout.write(String.format(format, outputFIMFilename));
-	}
+	} 
 	
 	private void writeParameters(PrintWriter fout) {
 		if (fout == null) return;
@@ -1089,6 +1258,7 @@ public class Parser extends BaseParser {
 		format = "parameters<-%s\n";
 		fout.write(String.format(format, cat(names)));
 	}
+	
 	private void writePFIMProjectFile() throws IOException {
 		if (wrotePFIM_R) return;
 		
@@ -1107,6 +1277,7 @@ public class Parser extends BaseParser {
 		
 		wrotePFIM_R = true;
 	}
+	
 	@Override
 	public void writePreMainBlockElements(PrintWriter fout, File output_dir) throws IOException{
 		if (fout == null) return;
@@ -1129,6 +1300,64 @@ public class Parser extends BaseParser {
 		fout.write(String.format(format, lexer.getModelName()));
 	}
 	
+	private void writeProt(PrintWriter fout) {
+		if (fout == null) return;
+		
+		TrialDesignBlockImpl tdb = (TrialDesignBlockImpl) lexer.getTrialDesign();
+		List<Observation> obs = tdb.getObservations();
+		if (obs.isEmpty()) return;
+		
+		Map<ArmDefinition, String> sampling_vectors_raw = new HashMap<ArmDefinition, String>(); 
+		for (ArmDefinition arm : tdb.getArms()) {
+			if (arm == null) continue;
+			Observation ob =  tdb.getObservation(arm);
+			if (ob == null) continue;
+			if (ob.getObservationTimes() == null) continue;
+			
+			double start = tdb.getObservationStart(arm);
+			setRecordVectorValues(true, start);
+			String sampling = parse(ctx, lexer.getStatement(ob.getObservationTimes())).trim();
+			sampling_vectors_raw.put(arm, sampling);
+			
+		}
+		
+		List<String> arm_sampling_vectors = new ArrayList<String>();
+		for (ArmDefinition arm : tdb.getArms()) {
+			if (arm == null) continue;
+			if (!sampling_vectors_raw.containsKey(arm)) continue;
+			String sampling_vector_raw = sampling_vectors_raw.get(arm);
+			
+			// Remove the 'R' vector notation.
+			sampling_vector_raw = sampling_vector_raw.replace("c(", "");
+			sampling_vector_raw = sampling_vector_raw.replace(")", "");
+			
+			double start = tdb.getObservationStart(arm);
+			String [] tokens = sampling_vector_raw.split(",");
+			List<Double> values = new ArrayList<Double>(); 
+			for (String token : tokens) {
+				token = token.trim();
+				Double value = Double.parseDouble(token) + start;
+				values.add(value);
+			}
+			
+			Collections.sort(values);	
+			arm_sampling_vectors.add(cat_(values));
+		}
+		
+		if (arm_sampling_vectors.isEmpty()) return;
+		StringBuffer s = new StringBuffer();
+		int i = 0;
+		for (String arm_sampling_vector : arm_sampling_vectors) {
+			if (arm_sampling_vector == null) continue;
+			if (i > 0) s.append(",");
+			s.append(arm_sampling_vector);
+			i++;
+		}
+		
+		String format = "protA<- list(%s)\n";
+		fout.write(String.format(format, s));
+	}
+	
 	private void writeRun(PrintWriter fout) {
 		if (fout == null) return;
 		OptimalDesignLexer od_lexer = (OptimalDesignLexer) lexer;
@@ -1144,7 +1373,32 @@ public class Parser extends BaseParser {
 		
 		String format = "run<-\"%s\"\n";
 		fout.write(String.format(format, run));
-	} 
+	}
+	
+	private void writeSubjects(PrintWriter fout) {
+		if (fout == null) return;
+		
+		TrialDesignBlockImpl tdb = (TrialDesignBlockImpl) lexer.getTrialDesign();
+		List<ArmDefinition> arms = tdb.getArms();
+		if (arms.isEmpty()) return;
+		
+		List<String> sizes = new ArrayList<String>(); 
+		for (ArmDefinition arm : arms) {
+			if (arm == null) continue;
+			Integer size = tdb.getArmSize(arm.getOid());
+			sizes.add(size.toString());
+		}
+		
+		String format = "subjects<-%s\n";
+		fout.write(String.format(format, cat(sizes)));
+	}
+	
+	private void writeSubjectsInput(PrintWriter fout) {
+		if (fout == null) return;
+			
+		String format = "subjects.input<-1\n";
+		fout.write(format);
+	}
 	
 	@Override
 	protected void writeScriptHeader(PrintWriter fout, String model_file) throws IOException {
@@ -1235,6 +1489,10 @@ public class Parser extends BaseParser {
 		writeTrand(fout);
 		writeOmega(fout);
 		writeGamma(fout);
+		writeErrorModelDerivedSettings(fout);
+		writeProt(fout);
+		writeSubjects(fout);
+		writeSubjectsInput(fout);
 		
 		fout.close();
 		
@@ -1254,20 +1512,5 @@ public class Parser extends BaseParser {
 		if (fout == null) return;
 		String format = "Trand<-%s\n";
 		fout.write(String.format(format, trand));
-	}
-	
-	private void writeGamma(PrintWriter fout) {
-		if (fout == null) return;
-		
-		ParameterBlock pb = lexer.getParameterBlock();
-		TrialDesignBlock tdb = lexer.getTrialDesign();
-		
-		if (!tdb.hasOccassions()) {
-			List<String> values = new ArrayList<String>();
-			for (int i = 0; i < pb.getIndividualParameters().size(); i++) values.add("0.0");
-				
-			String format = "gamma<-diag(%s)";
-			fout.write(String.format(format, cat(values)));
-		}
 	}
 }
