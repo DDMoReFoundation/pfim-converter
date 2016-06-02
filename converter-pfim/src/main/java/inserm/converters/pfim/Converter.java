@@ -624,10 +624,6 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		return new LanguageVersionImpl("PharmML", preferred_pharmml_version);
 	}
 	
-	private void createPKPDScript(PrintWriter fout, File src, File outputDirectory) throws IOException {
-		//parser.writeSTDIN();
-    }
-	
 	private File createScript(File src, File outputDirectory) throws Exception {
         if (outputDirectory == null) throw new NullPointerException("The output directroy is NULL");
         String output_filename = parser.getScriptFilename(outputDirectory.getAbsolutePath());
@@ -637,7 +633,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
         PrintWriter fout = new PrintWriter(output_filename);
 	
         parser.writePreMainBlockElements(fout, outputDirectory);
-        createPKPDScript(fout,src, outputDirectory);
+        parser.writeModelCall(fout);
         parser.writeEOF(fout);
         fout.close();
         fout = null;
@@ -1908,7 +1904,6 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
     private void sortElementOrdering() throws NullPointerException, IOException { 
 		if (sort_structural_model) sortStructuralBlock(getStrucuturalBlock());
 	}
-
 
     private void sortStructuralBlock(StructuralBlock sb) throws NullPointerException, IOException {
 		if (sb == null) return;

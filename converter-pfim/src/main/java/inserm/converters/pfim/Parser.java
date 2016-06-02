@@ -131,6 +131,8 @@ import eu.ddmore.libpharmml.dom.uncertml.VarRefType;
  * PFIM R-based code generator.
  */
 public class Parser extends BaseParser {
+	private final static String directory_program_replacement_label = "DIRECTORY_PROGRAM_REPLACE";
+	private final static String directory_replacement_label = "DIRECTORY_REPLACE";
 	private static final String MODEL_FILESTEM = "model";
 	private static final String pfimFIMFilename = "FIM.txt";
 	private static final String pfimProjectFilename = "PFIM";
@@ -511,6 +513,10 @@ public class Parser extends BaseParser {
 		return stripOuterBrackets(symbol);
 	}
 	
+	private String getModelFilename() {
+		return  MODEL_FILESTEM + "." + script_file_suffix;
+	}
+	
 	@Override
 	public String getModelFunctionFilename(String output_dir, StructuralBlock sb) {
 		return String.format("%s%s%s.%s", output_dir, File.separator, MODEL_FILESTEM, script_file_suffix);
@@ -820,15 +826,15 @@ public class Parser extends BaseParser {
 	public void setFIMType(String type) {
 		if (type == null) return;
 		fim_type = FIMtype.valueOf(type.toUpperCase());
-	}
-	
+	} 
 	/**
 	 * Specify the R-generated output filename in the CWD.
 	 * @param filename Output Filename
 	 */
 	public void setOutputFIMFilename(String filename) {
 		if (filename != null) outputFIMFilename = filename;
-	} 
+	}
+	
 	private void setRecordVectorValues(boolean decision, double offset) {
 		record_vector_values = decision;
 		current_offset = offset;
@@ -927,12 +933,12 @@ public class Parser extends BaseParser {
 			return;
 		}
 	}
-	
+
 	private void writeBoundsDefault(PrintWriter fout) {
 		if (fout == null) return;
 		fout.write("boundA<-list(c(0,Inf))\n");
 	}
-
+	
 	private void writeCondInitExpression(PrintWriter fout) {
 		if (fout == null) return;
 		StructuralBlock sb = lexer.getStrucuturalBlock();
@@ -1042,6 +1048,13 @@ public class Parser extends BaseParser {
 		for (ObservationBlock ob : obs) processErrorModel(i++, ob, fout);
 	}
 	
+	private void writeFileModel(PrintWriter fout) {
+		if (fout == null) return;
+		String model_filename = getModelFilename();
+		String format = "file.model<-\"%s\"\n";
+		fout.write(String.format(format, model_filename));
+	}
+	
 	private void writeFIMType(PrintWriter fout) {
 		if (fout == null) return;
 		
@@ -1064,6 +1077,17 @@ public class Parser extends BaseParser {
 		}
 	}
 	
+	private void writeGraphInf(PrintWriter fout) {
+		if (fout == null) return;
+		String format = "graph.infA<-c(0)\n";
+		fout.write(format);
+	}
+	
+	private void writeGraphLogical(PrintWriter fout) {
+		if (fout == null) return;
+		fout.write("graph.logical<-T\n");
+	}
+	
 	private void writeGraphOnly(PrintWriter fout) {
 		if (fout == null) return;
 		String decision = "FALSE";
@@ -1071,6 +1095,21 @@ public class Parser extends BaseParser {
 		
 		String format = "graph.only<-%s\n";
 		fout.write(String.format(format, decision));
+	}
+	
+	private void writeGraphSensiLogical(PrintWriter fout) {
+		if (fout == null) return;
+		fout.write("graphsensi.logical<-F\n");
+	}
+	
+	private void writeGraphSup(PrintWriter fout) {
+		if (fout == null) return;
+		
+		double max_time = 0.0;
+		for (double time : recorded_vector_values) if (time > max_time) max_time = time;
+		
+		String format = "graph.supA<-c(%s)\n";
+		fout.write(String.format(format, max_time));
 	}
 	
 	private void writeIdenticalDose(PrintWriter fout) {
@@ -1093,7 +1132,7 @@ public class Parser extends BaseParser {
 		ParameterBlockImpl pb = (ParameterBlockImpl) lexer.getParameterBlock();
 		for (Object o : pb.getIndividualParameterAssignments()) parse(o, lexer.getStatement(o), fout);
 		fout.write("\n");
-	}
+	} 
 	
 	private void writeLocalVariableAssignments(PrintWriter fout, StructuralBlock sb) {
 		if (fout == null || sb == null) return;
@@ -1105,11 +1144,21 @@ public class Parser extends BaseParser {
 		fout.write("\n");
 	}
 	
-	private void writeModelFile(PrintWriter fout) {
+	private void writeLogLogical(PrintWriter fout) {
 		if (fout == null) return;
-		String model_filename = MODEL_FILESTEM + "." + script_file_suffix;
-		String format = "file.model<-\"%s\"\n";
-		fout.write(String.format(format, model_filename));
+		String format = "log.logical<-F\n";
+		fout.write(format);
+	}
+	
+	/**
+	 * Generate a call to PFIM.
+	 * @param fout Output
+	 */
+	public void writeModelCall(PrintWriter fout) {
+		if (fout == null) return;
+		
+		String format = "PFIM(model.file=\"stdin.r\")";
+		fout.write(format);
 	}
 	
 	private void writeModelForm(PrintWriter fout) {
@@ -1123,12 +1172,28 @@ public class Parser extends BaseParser {
 		String format = "modelform<-\"%s\"\n";
 		fout.write(String.format(format, form));
 	}
-	
 	private void writeModelFunction(PrintWriter fout, StructuralBlock sb) throws IOException {
 		if (fout == null) throw new NullPointerException();
 		
 		writeScriptHeader(fout, lexer.getModelFilename());
 		if (sb.isODE()) writeODEModelFunction(fout, sb);
+	}
+	
+	private void writeNamesDataX(PrintWriter fout) {
+		if (fout == null) return;
+		fout.write("names.datax<-c(\"Time\")\n");
+	}
+	
+	private void writeNamesDataY(PrintWriter fout) {
+		if (fout == null) return;
+		String yLabel = "Amount";
+		
+		Converter c = (Converter) lexer;
+		List<VariableDefinition> exported_locals = c.getExportedLocalVariables();
+		if (!exported_locals.isEmpty()) yLabel = z.get(exported_locals.get(0));
+		
+		String format = "names.datay<-c(\"%s\")\n";
+		fout.write(String.format(format, yLabel));
 	}
 	
 	private void writeNum(PrintWriter fout) {
@@ -1159,7 +1224,7 @@ public class Parser extends BaseParser {
 		String idv = z.get(lexer.getAccessor().getIndependentVariable()).toLowerCase();
 		
 		String format = "%s <- function(%s,%s,%s) {\n";
-		fout.write(String.format(format, MODEL_FILESTEM, idv, state_vector_symbol, param_model_symbol));
+		fout.write(String.format(format, "formED", idv, state_vector_symbol, param_model_symbol));
 		
 		writeIndividualParameterAssignments(fout);
 		writeLocalVariableAssignments(fout, sb);
@@ -1168,6 +1233,7 @@ public class Parser extends BaseParser {
 		
 		fout.write("}\n");
 	}
+	
 	private void writeODEModelFunctionReturnStatement(PrintWriter fout, StructuralBlock sb) {
 		if (fout == null || sb == null) return;
 		
@@ -1200,6 +1266,7 @@ public class Parser extends BaseParser {
 			fout.write(String.format(format, dv_array));
 		}
 	}
+	
 	private void writeOmega(PrintWriter fout) {
 		if (fout == null) return;
 		
@@ -1242,7 +1309,7 @@ public class Parser extends BaseParser {
 		
 		String format = "outputFIM<-\"%s\"\n";
 		fout.write(String.format(format, outputFIMFilename));
-	} 
+	}
 	
 	private void writeParameters(PrintWriter fout) {
 		if (fout == null) return;
@@ -1271,6 +1338,11 @@ public class Parser extends BaseParser {
 		for (int i = 0; i < pfimProjectTemplate.size(); i++) {
 			String line = pfimProjectTemplate.get(i);
 			if (line == null) continue;
+			
+			if (line.contains(directory_replacement_label))
+				line = line.replace(directory_replacement_label, lexer.getOutputDirectory());
+			else if (line.contains(directory_program_replacement_label))
+				line = line.replace(directory_program_replacement_label, programDirectory);
 			fout.write(line + "\n");
 		}
 		fout.close();
@@ -1375,31 +1447,6 @@ public class Parser extends BaseParser {
 		fout.write(String.format(format, run));
 	}
 	
-	private void writeSubjects(PrintWriter fout) {
-		if (fout == null) return;
-		
-		TrialDesignBlockImpl tdb = (TrialDesignBlockImpl) lexer.getTrialDesign();
-		List<ArmDefinition> arms = tdb.getArms();
-		if (arms.isEmpty()) return;
-		
-		List<String> sizes = new ArrayList<String>(); 
-		for (ArmDefinition arm : arms) {
-			if (arm == null) continue;
-			Integer size = tdb.getArmSize(arm.getOid());
-			sizes.add(size.toString());
-		}
-		
-		String format = "subjects<-%s\n";
-		fout.write(String.format(format, cat(sizes)));
-	}
-	
-	private void writeSubjectsInput(PrintWriter fout) {
-		if (fout == null) return;
-			
-		String format = "subjects.input<-1\n";
-		fout.write(format);
-	}
-	
 	@Override
 	protected void writeScriptHeader(PrintWriter fout, String model_file) throws IOException {
 		if (fout == null) return;
@@ -1439,9 +1486,18 @@ public class Parser extends BaseParser {
 	
 	private void writeScriptLibraryReferences(PrintWriter fout) throws IOException {
 		if (fout == null) return;
-		String format = "\nsource('%s')\n";
+		
+		String format = "setwd(\"%s\")\n";
+		fout.write(String.format(format, lexer.getOutputDirectory()));
+		
+		format = "directory<-getwd()\n";
+		fout.write(format);
+		
+		format = "directory.program<-\"%s\"\n";
+		fout.write(String.format(format, programDirectory));
+		
+		format = "source('%s')\n\n";
 		fout.write(String.format(format, getPFIMProjectFilepath()));
-		fout.write("PFIM()\n");
 	}
 	
 	private void writeSolverSettings(PrintWriter fout) {
@@ -1451,7 +1507,7 @@ public class Parser extends BaseParser {
 		fout.write(String.format(format, "AtolEQ", atol));
 		fout.write(String.format(format, "Hmax", "Inf"));
 	}
-	
+		
 	/**
 	 * Write a PFIM STDIN file.
 	 * @throws IOException
@@ -1464,7 +1520,7 @@ public class Parser extends BaseParser {
 		PrintWriter fout = new PrintWriter(outFilepath);
 		writeScriptHeader(fout, lexer.getModelFilename());
 		writeProjectName(fout);
-		writeModelFile(fout);
+		writeFileModel(fout);
 		writeOutputFilename(fout);
 		writeOutputFIMFilename(fout);
 		writeFIMType(fout);
@@ -1506,59 +1562,29 @@ public class Parser extends BaseParser {
 		writtenSTDIN = true;
 	}
 	
-	private void writeYRange(PrintWriter fout) {
+	private void writeSubjects(PrintWriter fout) {
 		if (fout == null) return;
-		String format = "y.rangeA<-NULL\n";
+		
+		TrialDesignBlockImpl tdb = (TrialDesignBlockImpl) lexer.getTrialDesign();
+		List<ArmDefinition> arms = tdb.getArms();
+		if (arms.isEmpty()) return;
+		
+		List<String> sizes = new ArrayList<String>(); 
+		for (ArmDefinition arm : arms) {
+			if (arm == null) continue;
+			Integer size = tdb.getArmSize(arm.getOid());
+			sizes.add(size.toString());
+		}
+		
+		String format = "subjects<-%s\n";
+		fout.write(String.format(format, cat(sizes)));
+	}
+	
+	private void writeSubjectsInput(PrintWriter fout) {
+		if (fout == null) return;
+			
+		String format = "subjects.input<-1\n";
 		fout.write(format);
-	}
-	
-	private void writeGraphInf(PrintWriter fout) {
-		if (fout == null) return;
-		String format = "graph.infA<-c(0)\n";
-		fout.write(format);
-	}
-	
-	private void writeGraphSup(PrintWriter fout) {
-		if (fout == null) return;
-		
-		double max_time = 0.0;
-		for (double time : recorded_vector_values) if (time > max_time) max_time = time;
-		
-		String format = "graph.supA<-c(%s)\n";
-		fout.write(String.format(format, max_time));
-	}
-	
-	private void writeLogLogical(PrintWriter fout) {
-		if (fout == null) return;
-		String format = "log.logical<-F\n";
-		fout.write(format);
-	}
-	
-	private void writeNamesDataY(PrintWriter fout) {
-		if (fout == null) return;
-		String yLabel = "Amount";
-		
-		Converter c = (Converter) lexer;
-		List<VariableDefinition> exported_locals = c.getExportedLocalVariables();
-		if (!exported_locals.isEmpty()) yLabel = z.get(exported_locals.get(0));
-		
-		String format = "names.datay<-c(\"%s\")\n";
-		fout.write(String.format(format, yLabel));
-	}
-		
-	private void writeNamesDataX(PrintWriter fout) {
-		if (fout == null) return;
-		fout.write("names.datax<-c(\"Time\")\n");
-	}
-	
-	private void writeGraphSensiLogical(PrintWriter fout) {
-		if (fout == null) return;
-		fout.write("graphsensi.logical<-F\n");
-	}
-	
-	private void writeGraphLogical(PrintWriter fout) {
-		if (fout == null) return;
-		fout.write("graph.logical<-T\n");
 	}
 	
 	private void writeTimeCondInit(PrintWriter fout) {
@@ -1574,5 +1600,11 @@ public class Parser extends BaseParser {
 		if (fout == null) return;
 		String format = "Trand<-%s\n";
 		fout.write(String.format(format, trand));
+	}
+	
+	private void writeYRange(PrintWriter fout) {
+		if (fout == null) return;
+		String format = "y.rangeA<-NULL\n";
+		fout.write(format);
 	}
 }
