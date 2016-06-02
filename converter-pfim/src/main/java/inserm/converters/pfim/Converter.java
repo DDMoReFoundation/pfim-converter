@@ -629,6 +629,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
         String output_filename = parser.getScriptFilename(outputDirectory.getAbsolutePath());
         
         parser.writeSTDIN();
+        parser.writeBatchFile();
         
         PrintWriter fout = new PrintWriter(output_filename);
 	

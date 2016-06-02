@@ -513,6 +513,11 @@ public class Parser extends BaseParser {
 		return stripOuterBrackets(symbol);
 	}
 	
+	private String getBatchFilepath() {
+		String cwd = lexer.getOutputDirectory();
+		return cwd + PREFERRED_SEPERATOR + "run.bat";
+	}
+	
 	private String getModelFilename() {
 		return  MODEL_FILESTEM + "." + script_file_suffix;
 	}
@@ -835,6 +840,14 @@ public class Parser extends BaseParser {
 		if (filename != null) outputFIMFilename = filename;
 	}
 	
+	/**
+	 * Set the program directory (installation path) for the PFIM R package.
+	 * @param dir_path
+	 */
+	public void setProgramDirectory(String dir_path) {
+		if (dir_path != null) programDirectory = dir_path; 
+	}
+	
 	private void setRecordVectorValues(boolean decision, double offset) {
 		record_vector_values = decision;
 		current_offset = offset;
@@ -855,6 +868,19 @@ public class Parser extends BaseParser {
 		PrintWriter mout = new PrintWriter(output_filename);	
 		writeModelFunction(mout, sb);	
 		mout.close();
+	}
+	
+	/**
+	 * Create a windows batch file.
+	 * @throws IOException
+	 */
+	public void writeBatchFile() throws IOException {
+		String outFilepath = getBatchFilepath();
+		
+		PrintWriter fout = new PrintWriter(outFilepath);
+		fout.write("@echo off\r\n");
+		fout.write("rscript --vanilla call_run.r\r\n");
+		fout.close();
 	}
 	
 	private void writeBeta(PrintWriter fout) {
@@ -903,7 +929,7 @@ public class Parser extends BaseParser {
 		String format = "beta<-%s\n";
 		fout.write(String.format(format, cat(betas)));
 	}
-	
+
 	private void writeBetaFixed(PrintWriter fout) {
 		if (fout == null) return;
 		
@@ -933,7 +959,7 @@ public class Parser extends BaseParser {
 			return;
 		}
 	}
-
+	
 	private void writeBoundsDefault(PrintWriter fout) {
 		if (fout == null) return;
 		fout.write("boundA<-list(c(0,Inf))\n");
@@ -1110,7 +1136,7 @@ public class Parser extends BaseParser {
 		
 		String format = "graph.supA<-c(%s)\n";
 		fout.write(String.format(format, max_time));
-	}
+	} 
 	
 	private void writeIdenticalDose(PrintWriter fout) {
 		BooleanValue value = null;
@@ -1132,7 +1158,7 @@ public class Parser extends BaseParser {
 		ParameterBlockImpl pb = (ParameterBlockImpl) lexer.getParameterBlock();
 		for (Object o : pb.getIndividualParameterAssignments()) parse(o, lexer.getStatement(o), fout);
 		fout.write("\n");
-	} 
+	}
 	
 	private void writeLocalVariableAssignments(PrintWriter fout, StructuralBlock sb) {
 		if (fout == null || sb == null) return;
@@ -1149,7 +1175,6 @@ public class Parser extends BaseParser {
 		String format = "log.logical<-F\n";
 		fout.write(format);
 	}
-	
 	/**
 	 * Generate a call to PFIM.
 	 * @param fout Output
@@ -1172,6 +1197,7 @@ public class Parser extends BaseParser {
 		String format = "modelform<-\"%s\"\n";
 		fout.write(String.format(format, form));
 	}
+	
 	private void writeModelFunction(PrintWriter fout, StructuralBlock sb) throws IOException {
 		if (fout == null) throw new NullPointerException();
 		
@@ -1182,7 +1208,7 @@ public class Parser extends BaseParser {
 	private void writeNamesDataX(PrintWriter fout) {
 		if (fout == null) return;
 		fout.write("names.datax<-c(\"Time\")\n");
-	}
+	} 
 	
 	private void writeNamesDataY(PrintWriter fout) {
 		if (fout == null) return;
@@ -1203,7 +1229,7 @@ public class Parser extends BaseParser {
 			fout.write("NUM<-F\n");
 			return;
 		}
-	} 
+	}
 	
 	private void writeNumberOfOccassions(PrintWriter fout) {
 		if (fout == null) return;
@@ -1483,7 +1509,7 @@ public class Parser extends BaseParser {
 		format = "%s Dated: %s\n\n";
 		fout.write(String.format(format, comment_char, new Date()));
 	}
-	
+		
 	private void writeScriptLibraryReferences(PrintWriter fout) throws IOException {
 		if (fout == null) return;
 		
@@ -1507,7 +1533,7 @@ public class Parser extends BaseParser {
 		fout.write(String.format(format, "AtolEQ", atol));
 		fout.write(String.format(format, "Hmax", "Inf"));
 	}
-		
+	
 	/**
 	 * Write a PFIM STDIN file.
 	 * @throws IOException
