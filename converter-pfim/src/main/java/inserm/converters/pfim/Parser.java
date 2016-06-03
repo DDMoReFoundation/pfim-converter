@@ -845,7 +845,10 @@ public class Parser extends BaseParser {
 	 * @param dir_path
 	 */
 	public void setProgramDirectory(String dir_path) {
-		if (dir_path != null) programDirectory = dir_path; 
+		if (dir_path != null) {
+			programDirectory = dir_path;
+			programDirectory = programDirectory.replace("\\", PREFERRED_SEPERATOR);
+		}
 	}
 	
 	private void setRecordVectorValues(boolean decision, double offset) {
@@ -1355,6 +1358,7 @@ public class Parser extends BaseParser {
 	private void writePFIMProjectFile() throws IOException {
 		if (wrotePFIM_R) return;
 		
+		if (programDirectory == null) throw new NullPointerException("PFIM Program Directory not specified.");
 		String outputFilepath = getPFIMProjectFilepath();
 		PrintWriter fout = new PrintWriter(outputFilepath);
 		
@@ -1369,6 +1373,7 @@ public class Parser extends BaseParser {
 				line = line.replace(directory_replacement_label, lexer.getOutputDirectory());
 			else if (line.contains(directory_program_replacement_label))
 				line = line.replace(directory_program_replacement_label, programDirectory);
+			
 			fout.write(line + "\n");
 		}
 		fout.close();
