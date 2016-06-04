@@ -32,6 +32,7 @@ import crx.converter.engine.common.DataFiles;
 import crx.converter.spi.ILexer;
 import crx.converter.spi.IParser;
 import crx.converter.spi.blocks.TrialDesignBlock;
+import crx.converter.tree.BinaryTree;
 import crx.converter.tree.TreeMaker;
 import eu.ddmore.libpharmml.dom.commontypes.DerivativeVariable;
 import eu.ddmore.libpharmml.dom.commontypes.OidRef;
@@ -300,7 +301,9 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 		// Assuming that the dose amount is an numeric quantity.
 		String stmt = stripOuterBrackets(p.parse(ctx, tm.newInstance(target)).trim());
 		dose_stmt_map.put(oid, stmt);
-		dose_time_raw.put(oid, Double.parseDouble(p.parse(ctx, tm.newInstance(bolus.getDosingTimes())).trim()));
+		BinaryTree bt = tm.newInstance(bolus.getDosingTimes());
+		lexer.updateNestedTrees();
+		dose_time_raw.put(oid, Double.parseDouble(p.parse(ctx, bt).trim()));
 	}
 	
 	private void processInterventionSequence(ArmDefinition arm) {

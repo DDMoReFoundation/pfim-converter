@@ -20,7 +20,8 @@ package inserm.converters.pfim;
  * Supported PFIM error models.
  */
 public enum SupportedErrorModel {
-	PROPORTIONAL("proportionalErrorModel");
+	PROPORTIONAL("proportionalErrorModel"),
+	PROPORTIONAL_ERROR("proportionalError");
 	
 	public static boolean contains(String value) {
 		for (SupportedErrorModel item : values()) if (item.toString().equals(value)) return true;

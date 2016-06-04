@@ -21,12 +21,16 @@ import static crx.converter.engine.PharmMLTypeChecker.isIndividualParameter;
 import static crx.converter.engine.PharmMLTypeChecker.isParameter;
 import static crx.converter.engine.PharmMLTypeChecker.isPopulationParameter;
 import static crx.converter.engine.PharmMLTypeChecker.isRandomVariable;
+import static crx.converter.engine.PharmMLTypeChecker.isScalarInterface;
+import static crx.converter.engine.PharmMLTypeChecker.isSymbolReference;
+import inserm.converters.pfim.Parser;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import crx.converter.engine.Accessor;
 import crx.converter.engine.assoc.Cluster;
 import crx.converter.engine.common.CorrelationRef;
 import crx.converter.engine.common.IndividualParameterAssignment;
@@ -47,6 +51,7 @@ import eu.ddmore.libpharmml.dom.modeldefn.Parameter;
 import eu.ddmore.libpharmml.dom.modeldefn.ParameterModel;
 import eu.ddmore.libpharmml.dom.modeldefn.ParameterRandomVariable;
 import eu.ddmore.libpharmml.dom.modeldefn.PopulationParameter;
+import eu.ddmore.libpharmml.dom.modellingsteps.FIMtype;
 
 /**
  * A class representing the code for a parameter model.
@@ -159,6 +164,31 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 		buildIndividualParameterTrees();
 		buildMatrixDeclarationTrees();
 		buildIPATrees();
+		checkedForNonRandomIndividualVariables();
+	}
+	
+	// Set FIM<-"P" to FIM<-"I"
+	private void checkedForNonRandomIndividualVariables() {
+		if (indiv_params.isEmpty()) return;
+			
+		int i = 0;
+		Accessor a = lexer.getAccessor();
+		for (IndividualParameter ip : indiv_params) {
+			if (ip.getAssign() != null) {
+				Object content = ip.getAssign().getContent();
+				if (isSymbolReference(content)) {
+					SymbolRef ref = (SymbolRef) content;
+					PharmMLRootType element = a.fetchElement(ref);
+					if (isPopulationParameter(element) || isParameter(element)) i++;
+				}
+				else if (isScalarInterface(content)) i++;
+			}
+		}
+		
+		if (indiv_params.size() == i) {
+			Parser parser = (Parser) lexer.getParser();
+			parser.setFIMType(FIMtype.I);
+		}
 	}
 	
 	private void clearAllParameterLists() {

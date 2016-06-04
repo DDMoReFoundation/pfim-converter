@@ -918,7 +918,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	 * @return Accessor
 	 */
 	public Accessor getAccessor() {
-		if (accessor == null) accessor = new Accessor(dom); 
+		if (accessor == null) accessor = new Accessor_(dom); 
 		return accessor;
 	}
 	

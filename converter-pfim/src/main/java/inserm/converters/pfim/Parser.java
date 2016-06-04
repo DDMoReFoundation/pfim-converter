@@ -117,7 +117,6 @@ import eu.ddmore.libpharmml.dom.modeldefn.StructuredModel.LinearCovariate;
 import eu.ddmore.libpharmml.dom.modeldefn.StructuredModel.LinearCovariate.PopulationValue;
 import eu.ddmore.libpharmml.dom.modeldefn.StructuredObsError;
 import eu.ddmore.libpharmml.dom.modeldefn.StructuredObsError.ErrorModel;
-import eu.ddmore.libpharmml.dom.modeldefn.StructuredObsError.ResidualError;
 import eu.ddmore.libpharmml.dom.modellingsteps.FIMtype;
 import eu.ddmore.libpharmml.dom.modellingsteps.ParameterEstimate;
 import eu.ddmore.libpharmml.dom.probonto.DistributionParameter;
@@ -488,6 +487,11 @@ public class Parser extends BaseParser {
 		VectorElements elements = v.getVectorElements();
 		if (elements == null) throw new NullPointerException("Vector elements are NULL.");
 		
+		if (elements.getListOfElements().size() == 1) {
+			VectorValue value = elements.getListOfElements().get(0);
+			if (value != null) return "0.0";
+		}
+		
 		for (VectorValue value : elements.getListOfElements()) {
 			if (value == null) continue;
 			if (lexer.hasStatement(value)) {
@@ -530,6 +534,23 @@ public class Parser extends BaseParser {
 	private String getPFIMProjectFilepath() throws IOException {
 		String cwd = lexer.getOutputDirectory();
 		return cwd + PREFERRED_SEPERATOR + pfimProjectFilename + "." + script_file_suffix;
+	}
+	
+	private String getProportionalErrorModelSlope(SymbolRef ref) {
+		String slope = "0.0";
+		if (ref == null) return slope;
+		
+		Accessor a = lexer.getAccessor();
+		OptimalDesignLexer c = (OptimalDesignLexer) lexer;
+		OptimalDesignStepImpl step = (OptimalDesignStepImpl) c.getOptimalDesignStep();
+		
+		PharmMLRootType element = a.fetchElement(ref);
+		if (!isPopulationParameter(element)) throw new NullPointerException("The proportional error component is not a numeric constant.");
+		PopulationParameter p = (PopulationParameter) element;
+		ParameterEstimate pe = step.getParameterEstimate(p);
+		if (pe == null) throw new NullPointerException("The expected parameter estimate is NULL");
+		slope = parse(ctx, lexer.getStatement(pe.getInitialEstimate())).trim();
+		return slope;
 	}
 	
 	private String getStdinFilepath() {
@@ -614,18 +635,6 @@ public class Parser extends BaseParser {
 		return false;
 	}
 	
-	private boolean is_residual_scope(ParameterRandomVariable eps) {
-		if (eps == null) return false;
-		
-		LevelReference lref = eps.getListOfVariabilityReference().get(0);
-		if (lref != null) {
-			VariabilityBlock vb = lexer.getVariabilityBlock(lref.getSymbRef());
-			if (vb != null) return vb.isResidualError();
-		}
-		
-		return false;
-	}
-	
 	private boolean isPiecewiseFunctionArgument(FunctionArgument arg) {
 		if (arg == null) return false;
 		if (arg.getAssign() != null) {
@@ -655,7 +664,6 @@ public class Parser extends BaseParser {
 	private void processErrorModel(int idx, ObservationBlock ob, PrintWriter fout) {
 		if (ob == null || fout == null) return;
 
-		Accessor a = lexer.getAccessor();
 		ObservationError error_model = ob.getObservationError();
 		if (!isStructuredError(error_model)) return;
 		StructuredObsError serr = (StructuredObsError) ob.getObservationError();
@@ -670,45 +678,23 @@ public class Parser extends BaseParser {
 
 		FunctionCallType call = (FunctionCallType) content;
 		String func_name = call.getSymbRef().getSymbIdRef();
-		if (!SupportedErrorModel.contains(func_name)) 
-			throw new UnsupportedOperationException("Error model not supported (type='" + func_name + "' )");
+		if (!SupportedErrorModel.contains(func_name)) throw new UnsupportedOperationException("Error model not supported (type='" + func_name + "')");
 
-		String inter = "0.0", slope = "0.0";
-		
-		OptimalDesignLexer c = (OptimalDesignLexer) lexer;
-		OptimalDesignStepImpl step = (OptimalDesignStepImpl) c.getOptimalDesignStep();
+		String inter = "0.0", slope = "0.0";		
 		SupportedErrorModel model_flag = SupportedErrorModel.fromValue(func_name);
-		if (SupportedErrorModel.PROPORTIONAL.equals(model_flag)) {
-			inter = "0.0";
-			ResidualError re = serr.getResidualError();
-			if (re != null) {
-				PharmMLRootType element = a.fetchElement(re.getSymbRef());
-				if (!isRandomVariable(element)) throw new IllegalStateException("A model element referenced in a residual error is not a random variable");
-				ParameterRandomVariable eps = (ParameterRandomVariable) element;
-				if (!is_residual_scope(eps)) throw new IllegalStateException("Random variable does not have residual scope (name='" + eps.getSymbId() +  "')");
-
-				Distribution dist = eps.getDistribution();
-				if (dist != null) {
-					ProbOnto probo = dist.getProbOnto();
-					if (probo != null) {
-						for (DistributionParameter dp : probo.getListOfParameter()) {
-							if (dp == null) continue;
-							ParameterName name = dp.getName();
-							if (name == null) continue;
-							if (ParameterName.STDEV.equals(name)) {
-								content = dp.getAssign().getContent();
-								if (!isSymbolReference(content)) continue;
-								SymbolRef ref = (SymbolRef) content;
-								element = a.fetchElement(ref);
-								if (!isPopulationParameter(element)) continue;
-								PopulationParameter p = (PopulationParameter) element;
-
-								ParameterEstimate pe = step.getParameterEstimate(p);
-								if (pe == null) throw new NullPointerException("The expected parameter estimate is NULL");
-								slope = parse(ctx, lexer.getStatement(pe.getInitialEstimate())).trim();
-							}
-						}
+		
+		final String proportional = "proportional";
+		if (SupportedErrorModel.PROPORTIONAL.equals(model_flag) || 
+			SupportedErrorModel.PROPORTIONAL_ERROR.equals(model_flag)) {
+			for (FunctionArgument arg : call.getListOfFunctionArgument()) {
+				if (proportional.equals(arg.getSymbId())) {
+					if (arg.getSymbRef() != null) slope = getProportionalErrorModelSlope(arg.getSymbRef());
+					else if (arg.getAssign() != null) {
+						content = arg.getAssign().getContent();
+						if (isSymbolReference(content)) slope = getProportionalErrorModelSlope((SymbolRef) content);
 					}
+					
+					break;
 				}
 			}
 		}
@@ -828,10 +814,18 @@ public class Parser extends BaseParser {
 	 * Set the type of FIM matrix generated by PFIM.
 	 * @param type FIM Type
 	 */
-	public void setFIMType(String type) {
-		if (type == null) return;
-		fim_type = FIMtype.valueOf(type.toUpperCase());
+	public void setFIMType(FIMtype type) {
+		if (type != null) fim_type = type;
 	} 
+	
+	/**
+	 * Set the type of FIM matrix generated by PFIM.
+	 * @param type FIM Type
+	 */
+	public void setFIMType(String type) {
+		if (type != null) fim_type = FIMtype.valueOf(type.toUpperCase());
+	} 
+	
 	/**
 	 * Specify the R-generated output filename in the CWD.
 	 * @param filename Output Filename
