@@ -357,14 +357,14 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	}
 	
 	private boolean add_plotting_block = false;
+	private List<ConversionDetail_> cached_details = new ArrayList<ConversionDetail_>();
 	private Version converterVersion = new VersionImpl(1, 7, 0);
 	private boolean created_parameter_context = false;
 	private StructuralBlock currentSb = null;
 	private DataFiles data_files = new DataFiles();
+	private boolean exceptionWithContinuousCovariate = false;
 	private boolean hasResetColumnUsageRegToCov = false;
-	private HashMap<Object, String> index_symbol_map = new HashMap<Object, String>();
 	private boolean is_echo_exception = true;
-	//private boolean isolate_conditional_dose_variable = true;
 	private boolean isolate_dt = true;
 	private ILibPharmML lib = null;
 	private Map<StructuralModel, List<PKMacro>> macro_input_map = new HashMap<StructuralModel, List<PKMacro>>();
@@ -414,11 +414,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	}
 	
 	@Override
-	public void addIndexSymbol(Object key, String value) {
-		if (key != null && value != null) {
-			if (!index_symbol_map.containsKey(key)) index_symbol_map.put(key, value);
-		}
-	}
+	public void addIndexSymbol(Object key, String value) { throw new UnsupportedOperationException(); }
 	
 	@Override
 	public boolean addStatement(NestedTreeRef ref) {
@@ -446,6 +442,21 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 			Part part = parts.get(key);
 			if (part == null) continue;
 			part.buildTrees();
+		}
+	}
+	
+	private void checkForContinuousCovariates() {
+		for (CovariateBlock cb : getCovariateBlocks()) {
+			if (cb.getContinuousCovariates().size() > 0) {
+				if (exceptionWithContinuousCovariate) throw new IllegalStateException("Input PharmML model continuous covariate. These are not supported by PFIM.");
+				else {
+					System.err.println("WARNING: Input model has continuous covariates. These are not supported by PFIM.");
+					ConversionDetail_ detail = new ConversionDetail_();
+					detail.addInfo("warning", "Input model has continuous covariates. These are not supported by PFIM.");
+					detail.setSeverity(ConversionDetail.Severity.WARNING);
+					cached_details.add(detail);
+				}
+			}
 		}
 	}
 	
@@ -488,6 +499,9 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		createStructuralTrees();
 		createBlockTrees();
 		createCovariateTrees();
+		
+		checkForContinuousCovariates();
+		sortElementOrdering();
 	}
 	
 	private void createBlockTrees() { buildPartTrees(sd.getBlocksMap()); }
@@ -779,7 +793,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 			}
 		}
 	}
-
+	
 	private void doParameterContext_LinearCovariate(LinearCovariate lc) {
 		if (lc == null) return;
 		
@@ -839,7 +853,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 			}
 		}
 	}
-	
+
 	private void doParameterContext_PopulationValue_(StructuredModel.LinearCovariate.PopulationValue pv) {
 		if (pv == null) return;
 		BinaryTree bt = tm.newInstance(pv);
@@ -968,6 +982,9 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		detail.setSeverity(ConversionDetail.Severity.INFO);
 		report.addDetail(detail);
 		report.setReturnCode(ConversionCode.SUCCESS);
+		
+		for (ConversionDetail_ cached_detail : cached_details) report.addDetail(cached_detail);
+		
 		return report;
 	}
 	
@@ -1000,6 +1017,8 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		detail.setMessage(e.getMessage());
 		report.addDetail(detail);
 		report.setReturnCode(ConversionCode.FAILURE);
+		
+		for (ConversionDetail_ cached_detail : cached_details) report.addDetail(cached_detail);
 		
 		return report;
 	}
@@ -1068,7 +1087,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		}
 		return idx;
 	}
-
+	
 	@Override
 	// Return zero index by default.
 	public List<PopulationParameter> getModelParameters() {
@@ -1078,7 +1097,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		} else 
 			return new ArrayList<PopulationParameter>();
 	}
-	
+
 	@Override
 	public String getName() { return name; }
 	
@@ -1153,7 +1172,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		return ctx;
 	}
-
+	
 	@Override
 	public Map<PopulationParameter, ParameterContext> getParameterContextMap() { return param_context_map; }
 
@@ -1162,8 +1181,6 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 
 	public ScriptDefinition getScriptDefinition() { return sd; }
 
-	
-	
 	@Override
 	public List<String> getSimulationOutputNames() {
 		List<String> names = new ArrayList<String>();
@@ -1180,6 +1197,8 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	
 		return names;
 	}
+
+	
 	
 	@Override
 	public Map<Integer, CommonVariableDefinition> getSimulationOutputs()  {
@@ -1212,7 +1231,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		return bt;
 	}
- 
+	
 	@Override
 	public Integer getStateVariableIndex(String name) {
 		Integer idx = -1;
@@ -1225,10 +1244,10 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 					
 		return idx;
 	}
-	
+ 
 	@Override
 	public List<StructuralBlock> getStructuralBlocks() { return sd.getStructuralBlocks(); }
-
+	
 	@Override
 	public StructuralBlock getStrucuturalBlock() {
 		if (currentSb == null) {
@@ -1237,7 +1256,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		return currentSb;
 	}
-	
+
 	@Override
 	public LanguageVersion getTarget() { return target; }
 	
@@ -1276,7 +1295,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	public TrialDesignBlock getTrialDesign() {
 		return sd.getTrialDesignBlock();
 	}
-
+	
 	@Override
 	public IValidationReport getValidationReport() { return validation_report; }
 
@@ -1317,7 +1336,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		return vb;
 	}
-	
+
 	private boolean guessColumnDoseContext(BaseStep step, VariableDefinition v) {
 		if (step == null || v == null) return false;
 		
@@ -1330,7 +1349,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		return true; // If reach here, infer it is a dose variable.
 	}
-
+	
 	@Override
 	public VariableDeclarationContext guessContext(VariableDefinition v) {
 		if (v == null) return VariableDeclarationContext.UNKNOWN;
@@ -1362,7 +1381,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 			
 		return VariableDeclarationContext.UNKNOWN;
 	}
-	
+
 	@Override
 	public boolean hasDoneEstimation() { throw new UnsupportedOperationException(); }
 	
@@ -1388,13 +1407,13 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		if (sb != null) return sb.hasEvents();
 		return false;
 	}
-
-	@Override
-	public boolean hasExternalDatasets() { return !data_files.getExternalDataSets().isEmpty(); }
 	
 	@Override
-	public boolean hasPlottingBlock() { return add_plotting_block; }
+	public boolean hasExternalDatasets() { return !data_files.getExternalDataSets().isEmpty(); }
 
+	@Override
+	public boolean hasPlottingBlock() { return add_plotting_block; }
+	
 	/**
 	 * Flag if the Lexer has adjustment an external dataset column usage declaration
 	 * from a Monolix (Regressor) to a NONMEM (covariate) setting.
@@ -1425,7 +1444,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		return false;
 	}
-	
+
 	@Override 
 	public boolean hasTrialDesign() { return getTrialDesign() != null; }
 	
@@ -1506,7 +1525,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	
 	@Override
 	public boolean isMixedEffect() { return false; }
-
+	
 	@Override
 	public boolean isModelParameter(String name) {
 		boolean isPopulationParameter = false;
@@ -1542,14 +1561,12 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 
 	@Override
 	public boolean isPermitEmptyTrialDesignBlock() { return permitEmptyTrialDesignBlock; }
-	
+
 	@Override
 	public boolean isRemoveIllegalCharacters() { return remove_illegal_chars; }
 	
 	@Override
 	public boolean isSaveSimulationOutput() { throw new UnsupportedOperationException();}
-	
-	
 	
 	@Override
 	public boolean isStateVariable(String name) {
@@ -1565,6 +1582,8 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		return isState;
 	}
+	
+	
 	
 	@Override
 	public boolean isStructuralBlockWithDosing(StructuralBlock sb) { throw new UnsupportedOperationException(); }
@@ -1669,7 +1688,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		} 
 		else throw new UnsupportedOperationException("Unrecognised target mapping context on a data column (name='" + cref.getColumnIdRef() + "')");
 	}
-
+	
 	private void remapDoseTarget(TabularDataset table, ColumnMapping mapping, List<MapType> maps) {
 		
 		if (mapping == null || maps == null || table == null) return;
@@ -1760,13 +1779,13 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 			}
 		}
 	}
-	
+
 	/**
 	 * Set the accessor handle to a model.
 	 * @param a Accessor handle
 	 */
 	public void setAccessor(Accessor a) { accessor = a; }
-
+	
 	@Override
 	public void setAddPlottingBlock(boolean decision) { }
 
@@ -1790,6 +1809,13 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	 * @param decision
 	 */
 	public void setEchoException(boolean decision) { is_echo_exception = decision; }
+
+	/**
+	 * Throw exception if input model has a continuous covariate.
+	 * Otherwise the PFIM converter just returns an exception. 
+	 * @param decision Decision
+	 */
+	public void setExceptionWithContinuousCovariate(boolean decision) { exceptionWithContinuousCovariate = decision; }
 	
 	@Override
 	public void setFilterReservedWords(boolean decision) { filter_reserved_words = decision; }

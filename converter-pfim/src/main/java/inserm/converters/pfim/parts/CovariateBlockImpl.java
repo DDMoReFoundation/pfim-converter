@@ -53,7 +53,6 @@ public class CovariateBlockImpl extends PartImpl implements CovariateBlock {
 	private Map<CovariateDefinition, CovariateParameterRef> cov_param_map = new HashMap<CovariateDefinition, CovariateParameterRef>();
 	private List<CovariateDefinition> covariates = new ArrayList<CovariateDefinition>();
 	private List<PopulationParameter> params = null;
-	
 	private List<String> symbols = new ArrayList<String>();
 	
 	/**
@@ -150,6 +149,8 @@ public class CovariateBlockImpl extends PartImpl implements CovariateBlock {
 										
 					for (CovariateTransformation transform : continuous.getListOfTransformation()) 
 						if (transform != null) lexer.addStatement(transform, tm.newInstance(transform));
+					
+					continuous_covariates.add(continuous);
 				}
 				covariates.add(cov);
 			}
