@@ -536,7 +536,7 @@ public class Parser extends BaseParser {
 		return cwd + PREFERRED_SEPERATOR + pfimProjectFilename + "." + script_file_suffix;
 	}
 	
-	private String getProportionalErrorModelSlope(SymbolRef ref) {
+	private String getParameterValueFromEstimate(SymbolRef ref) {
 		String slope = "0.0";
 		if (ref == null) return slope;
 		
@@ -683,18 +683,34 @@ public class Parser extends BaseParser {
 		String inter = "0.0", slope = "0.0";		
 		SupportedErrorModel model_flag = SupportedErrorModel.fromValue(func_name);
 		
-		final String proportional = "proportional";
+		final String proportional = "proportional", additive= "additive";
 		if (SupportedErrorModel.PROPORTIONAL.equals(model_flag) || 
 			SupportedErrorModel.PROPORTIONAL_ERROR.equals(model_flag)) {
 			for (FunctionArgument arg : call.getListOfFunctionArgument()) {
 				if (proportional.equals(arg.getSymbId())) {
-					if (arg.getSymbRef() != null) slope = getProportionalErrorModelSlope(arg.getSymbRef());
+					if (arg.getSymbRef() != null) slope = getParameterValueFromEstimate(arg.getSymbRef());
 					else if (arg.getAssign() != null) {
 						content = arg.getAssign().getContent();
-						if (isSymbolReference(content)) slope = getProportionalErrorModelSlope((SymbolRef) content);
+						if (isSymbolReference(content)) slope = getParameterValueFromEstimate((SymbolRef) content);
 					}
 					
 					break;
+				}
+			}
+		} else if (SupportedErrorModel.COMBINED_ERROR.equals(model_flag)) {
+			for (FunctionArgument arg : call.getListOfFunctionArgument()) {
+				if (proportional.equals(arg.getSymbId())) {
+					if (arg.getSymbRef() != null) slope = getParameterValueFromEstimate(arg.getSymbRef());
+					else if (arg.getAssign() != null) {
+						content = arg.getAssign().getContent();
+						if (isSymbolReference(content)) slope = getParameterValueFromEstimate((SymbolRef) content);
+					}
+				} else if (additive.equals(arg.getSymbId())) {
+					if (arg.getSymbRef() != null) inter = getParameterValueFromEstimate(arg.getSymbRef());
+					else if (arg.getAssign() != null) {
+						content = arg.getAssign().getContent();
+						if (isSymbolReference(content)) inter = getParameterValueFromEstimate((SymbolRef) content);
+					}
 				}
 			}
 		}
