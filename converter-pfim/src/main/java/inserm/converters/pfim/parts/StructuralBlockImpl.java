@@ -129,13 +129,15 @@ public class StructuralBlockImpl extends PartImpl implements StructuralBlock, Or
 				// Check if a local variable is a dose variable specified by an external file reference.
 				// Isolate as required from the locals list.
 				boolean isConditionalDoseEventTarget = false;
-				 
+				
+				VariableDeclarationContext ctx = lexer.guessContext(local);
+				
 				if (lexer.isIsolatingDoseTimingVariable()) {
-					if (VariableDeclarationContext.DT.equals(lexer.guessContext(local))) {
+					if (VariableDeclarationContext.DT.equals(ctx)) {
 						doseTimingVariable = local;
 						continue;
-					}
-				}
+					} else if (VariableDeclarationContext.DOSE.equals(ctx)) continue;
+				} 
 				
 				if (isConditionalDoseEventTarget && lexer.isIsolateConditionalDoseVariable()) continue; // Skip so it doesn't get added to the locals list.
 				

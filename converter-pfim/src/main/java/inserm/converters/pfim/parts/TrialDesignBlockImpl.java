@@ -29,9 +29,10 @@ import javax.xml.bind.JAXBElement;
 
 import crx.converter.engine.Accessor;
 import crx.converter.engine.common.DataFiles;
+import crx.converter.engine.common.InterventionSequenceRef;
 import crx.converter.spi.ILexer;
 import crx.converter.spi.IParser;
-import crx.converter.spi.blocks.TrialDesignBlock;
+import crx.converter.spi.blocks.TrialDesignBlock2;
 import crx.converter.tree.BinaryTree;
 import crx.converter.tree.TreeMaker;
 import eu.ddmore.libpharmml.dom.commontypes.DerivativeVariable;
@@ -54,19 +55,7 @@ import eu.ddmore.libpharmml.dom.trialdesign.TrialDesign;
 /**
  * Wrapper class for the PharmML trial design block.
  */
-public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
-	public static class InterventionSequenceRef {
-		public String administration_oid = null;
-		public double start = 0.0;
-		
-		public InterventionSequenceRef(OidRef admin_ref, double start_) {
-			if (admin_ref == null) throw new NullPointerException("OID Reference is NULL");
-			administration_oid = admin_ref.getOidRef();
-			if (administration_oid == null) throw new NullPointerException("OID is NULL");
-			start = start_;
-		}
-	}
-	
+public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 {
 	private Map<ArmDefinition,String> arm_2_observation_map = new  HashMap<ArmDefinition,String>(); 
 	private Map<String, ArmDefinition> arm_map = new HashMap<String, ArmDefinition>();
 	private Map<ArmDefinition,Double> arm_observation_start_map = new  HashMap<ArmDefinition,Double>();
@@ -106,6 +95,7 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 		if (oid == null) throw new NullPointerException("Arm identifier is NULL");
 		if (!arm_map.containsKey(oid)) arm_map.put(oid, arm);
 	} 
+	
 	private void buildArms() {
 		Arms arm_list = td.getArms();
 		if (arm_list == null) return;
@@ -161,11 +151,7 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 		buildArms();
 	}
 	
-	/**
-	 * Get the dose time associated with an ad
-	 * @param admin_oid
-	 * @return
-	 */
+	@Override
 	public double getAdministrationStartTime(String admin_oid) {
 		if (admin_oid == null) return 0.0;
 		if (dose_time_raw.containsKey(admin_oid)) return dose_time_raw.get(admin_oid);
@@ -200,11 +186,20 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 		else return null;
 	}
 	
-	/**
-	 * Get the intervention reference linked to the arm.
-	 * @param arm Arm Definition
-	 * @return InterventionSequenceRef
-	 */
+	@Override
+	public Map<String, PharmMLRootType> getDoseTargetMap() { return dose_target_map; }
+	
+	@Override
+	public List<PharmMLRootType> getDoseTargets() {
+		List<PharmMLRootType> targets = new ArrayList<PharmMLRootType>();
+		for (PharmMLRootType target : dose_target_map.values()) {
+			if (target == null) continue;
+			if (!targets.contains(target)) targets.add(target);
+		}
+		return targets;
+	}
+	
+	@Override
 	public InterventionSequenceRef getInterventionSequenceRef(ArmDefinition arm) {
 		if (arm == null) return null;
 		String oid = arm.getOid();
@@ -212,20 +207,13 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 		else return null;
 	}
 	
-	/**
-	 * Get the model/source for the trial design block.
-	 * @return TrialDesign
-	 */
+	@Override
 	public TrialDesign getModel() { return td; }
 	
 	@Override
 	public String getName() { return "trial_design"; }
 	
-	/**
-	 * Get the observation linked to the Arm.
-	 * @param arm Arm Instance
-	 * @return Observation
-	 */
+	@Override
 	public Observation getObservation(ArmDefinition arm) {
 		if (arm == null) return null;
 		if (arm_2_observation_map.containsKey(arm)) {
@@ -236,28 +224,17 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 		return null;
 	}
 	
-	/**
-	 * Get the named observation element
-	 * @param oid Observation Identifier
-	 * @return Observation
-	 */
+	@Override
 	public Observation getObservation(String oid) {
 		if (oid == null) return null;
 		else if (obs_map.containsKey(oid))  return obs_map.get(oid);
 		else return null;
 	}
 	
-	/**
-	 * Get list of declared observations.
-	 * @return
-	 */
+	@Override
 	public List<Observation> getObservations() { return obs; }
-	
-	/**
-	 * Get the start offset for an Arm
-	 * @param arm Arm Instance
-	 * @return double
-	 */
+
+	@Override
 	public double getObservationStart(ArmDefinition arm) {
 		double start = 0.0;
 		if (arm != null) {
@@ -266,20 +243,15 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 		
 		return start;
 	}
-	
+
 	@Override
 	public List<DerivativeVariable> getStateVariablesWithDosing() { throw new UnsupportedOperationException(); }
-
+	
 	@Override
 	public List<String> getSymbolIds() { return new ArrayList<String>(); }
-
-	/**
-	 * Flag if a state variable is associated with a dosing event.
-	 * @return boolean
-	 */
-	public boolean hasDosing() {
-		return getStateVariablesWithDosing().isEmpty() == false;
-	}
+	
+	@Override
+	public boolean hasDosing() { return getStateVariablesWithDosing().isEmpty() == false; }
 	
 	@Override
 	public boolean hasOccassions() { return td.getListOfOccasions().size() > 0; }
@@ -338,7 +310,7 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock {
 			start = Double.parseDouble(p.parse(ctx, tm.newInstance(oseq.getStart())).trim());
 		arm_observation_start_map.put(arm, start);
 	}
-	
+
 	private void processSize(ArmDefinition arm) {
 		if (arm == null) return;
 		if (arm.getOid() == null) return;

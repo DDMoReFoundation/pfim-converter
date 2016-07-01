@@ -44,7 +44,6 @@ import static crx.converter.engine.PharmMLTypeChecker.isVector;
 import inserm.converters.pfim.parts.OptimalDesignStepImpl;
 import inserm.converters.pfim.parts.ParameterBlockImpl;
 import inserm.converters.pfim.parts.TrialDesignBlockImpl;
-import inserm.converters.pfim.parts.TrialDesignBlockImpl.InterventionSequenceRef;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -71,11 +70,13 @@ import crx.converter.engine.FixedParameter;
 import crx.converter.engine.SymbolReader.ModifiedSymbol;
 import crx.converter.engine.common.BaseParser;
 import crx.converter.engine.common.IndividualParameterAssignment;
+import crx.converter.engine.common.InterventionSequenceRef;
+import crx.converter.engine.common.SimulationOutput;
 import crx.converter.spi.OptimalDesignLexer;
 import crx.converter.spi.blocks.ObservationBlock;
 import crx.converter.spi.blocks.ParameterBlock;
 import crx.converter.spi.blocks.StructuralBlock;
-import crx.converter.spi.blocks.TrialDesignBlock;
+import crx.converter.spi.blocks.TrialDesignBlock2;
 import crx.converter.spi.blocks.VariabilityBlock;
 import crx.converter.spi.steps.OptimalDesignStep_;
 import crx.converter.tree.BinaryTree;
@@ -173,6 +174,7 @@ public class Parser extends BaseParser {
 	private RandomEffectModelOption trand = RandomEffectModelOption.EXPONENTIAL;
 	private boolean writtenSTDIN = false;
 	private boolean wrotePFIM_R = false;
+	private String analytical_model_dose_variable = "X";
 	
 	/**
 	 * Constructor
@@ -980,31 +982,27 @@ public class Parser extends BaseParser {
 	
 	private void writeCondInitExpression(PrintWriter fout) {
 		if (fout == null) return;
-		StructuralBlock sb = lexer.getStrucuturalBlock();
-		TrialDesignBlockImpl tdb = (TrialDesignBlockImpl) lexer.getTrialDesign();
 		
-		if (sb.isODE()) {
-			StringBuffer s = new StringBuffer("condinit<-expression(");
-			int i = 0;
-			for (ArmDefinition arm : tdb.getArms()) {
-				String dosing_vector = dosing_vector_map.get(arm);
-				if (dosing_vector == null) throw new NullPointerException("No dose vector generated from the initial conditions");
-				if (i > 0) s.append(",");
-				s.append(dosing_vector);
-				i++;
-			}
-			s.append(")\n");
-			fout.write(s.toString());
-		} else 
-			throw new UnsupportedOperationException("AF not supported yet.");
+		TrialDesignBlockImpl tdb = (TrialDesignBlockImpl) lexer.getTrialDesign();
+		StringBuffer s = new StringBuffer("condinit<-expression(");
+		int i = 0;
+		for (ArmDefinition arm : tdb.getArms()) {
+			String dosing_vector = dosing_vector_map.get(arm);
+			if (dosing_vector == null) throw new NullPointerException("No dose vector generated from the initial conditions");
+			if (i > 0) s.append(",");
+			s.append(dosing_vector);
+			i++;
+		}
+		s.append(")\n");
+		fout.write(s.toString());
 	}
 	
 	private void writeCondInitIdentical(PrintWriter fout) throws IOException {
 		if (fout == null) return;
 		
 		TreeMaker tm = lexer.getTreeMaker();
-		TrialDesignBlockImpl tdb = (TrialDesignBlockImpl) lexer.getTrialDesign();
-		StructuralBlock sb = (StructuralBlock) lexer.getStrucuturalBlock();
+		TrialDesignBlock2 tdb = (TrialDesignBlock2) lexer.getTrialDesign();
+		StructuralBlock sb = lexer.getStrucuturalBlock();
 		String default_ic_statement = "0.0";
 		
 		Set<String> unique_dose_vectors = new HashSet<String>();
@@ -1037,12 +1035,19 @@ public class Parser extends BaseParser {
 				String dose_vector = cat(ic_statements);
 				dosing_vector_map.put(arm, dose_vector);
 				unique_dose_vectors.add(dose_vector);
-			} else
-				throw new UnsupportedOperationException("AF not supported yet.");
+			} else {
+				// AF so just use a default empty vector.
+				List<String> ic_statements = new ArrayList<String>();
+				ic_statements.add("0.0");
+				String dose_vector = cat(ic_statements);
+				dosing_vector_map.put(arm, dose_vector);
+				unique_dose_vectors.add(dose_vector);
+			}
 		}
 		
 		String result = "TRUE";
 		if (unique_dose_vectors.size() > 1) result = "FALSE";
+		else if (unique_dose_vectors.size() == 0) result = "TRUE";
 		String format = "condinit.identical<-%s\n";
 		fout.write(String.format(format, result));
 	}
@@ -1105,7 +1110,7 @@ public class Parser extends BaseParser {
 		if (fout == null) return;
 		
 		ParameterBlock pb = lexer.getParameterBlock();
-		TrialDesignBlock tdb = lexer.getTrialDesign();
+		TrialDesignBlock2 tdb = (TrialDesignBlock2) lexer.getTrialDesign();
 		
 		if (!tdb.hasOccassions()) {
 			List<String> values = new ArrayList<String>();
@@ -1157,6 +1162,10 @@ public class Parser extends BaseParser {
 		if (sb == null) throw new NullPointerException("Structural block is NULL");
 		
 		if (sb.isODE()) value = new TrueBoolean();
+		else {
+			TrialDesignBlock2 tdb = (TrialDesignBlock2) lexer.getTrialDesign();
+			if (tdb.getArmCount() == 1) value = new TrueBoolean();
+		}
 		
 		if (value == null) throw new IllegalStateException("Identical dose flag not specified");
 		
@@ -1216,6 +1225,57 @@ public class Parser extends BaseParser {
 		
 		writeScriptHeader(fout, lexer.getModelFilename());
 		if (sb.isODE()) writeODEModelFunction(fout, sb);
+		else writeAnalyticalModelFunction(fout, sb);
+	}
+	
+	// TODO: Work
+	private void writeAnalyticalModelFunction(PrintWriter fout, StructuralBlock sb) {
+		if (fout == null || sb == null) return;
+		String idv = z.get(lexer.getAccessor().getIndependentVariable());
+		
+		TrialDesignBlock2 tdb = (TrialDesignBlock2) lexer.getTrialDesign();
+		if (tdb == null) throw new NullPointerException("The trial design block was NULL.");
+		
+		List<PharmMLRootType> targets = tdb.getDoseTargets();
+		int variable_count = 0;
+		VariableDefinition dose_variable = null;
+		for (PharmMLRootType target : targets) {
+			if (isLocalVariable(target)) {
+				dose_variable = (VariableDefinition) target;
+				variable_count++;
+			}
+		}
+		
+		if (variable_count != 1) throw new IllegalStateException("PFIM can only support 1 dose target variable for analytical models (AF).");
+		z.addReservedWord(dose_variable.getSymbId(), analytical_model_dose_variable);
+		
+		String format = "%s <- function(%s,%s,%s) {\n";
+		fout.write(String.format(format, "form", idv, param_model_symbol, analytical_model_dose_variable));
+		
+		writeIndividualParameterAssignments(fout);
+		writeLocalVariableAssignments(fout, sb);
+		writeAnalyticalReturnStatement(fout, sb);
+		
+		fout.write("}\n");
+	}
+	
+	private void writeAnalyticalReturnStatement(PrintWriter fout, StructuralBlock sb) {
+		if (fout == null || sb == null) return;
+		
+		ObservationBlock ob = lexer.getObservationBlocks().get(0);
+		if (ob == null) 
+		throw new IllegalStateException("No observation model declared in the PharmML so unable to determine variable(s) to export.");
+		
+		List<SimulationOutput> outputs = ob.getSimulationOutputs();
+		if (outputs.isEmpty()) 
+		throw new IllegalStateException("The observation model has no declared output variables. Unable to generate model function return statement");
+		
+		if (outputs.size() == 1) {
+			String format = "\treturn(%s)\r\n";
+			fout.write(String.format(format, z.get(outputs.get(0))));
+		} else {
+			throw new UnsupportedOperationException("Multiple output variables in analytical functions not supported yet.");
+		}
 	}
 	
 	private void writeNamesDataX(PrintWriter fout) {
@@ -1240,13 +1300,14 @@ public class Parser extends BaseParser {
 		StructuralBlock sb = lexer.getStrucuturalBlock();
 		if (sb.isODE()) {
 			fout.write("NUM<-F\n");
-			return;
+		} else {
+			fout.write("NUM<-T\n");
 		}
 	}
 	
 	private void writeNumberOfOccassions(PrintWriter fout) {
 		if (fout == null) return;
-		TrialDesignBlock tdb = lexer.getTrialDesign();
+		TrialDesignBlock2 tdb = (TrialDesignBlock2) lexer.getTrialDesign();
 		if (!tdb.hasOccassions()) fout.write("n_occ<-1\n");
 	}
 	
@@ -1260,7 +1321,7 @@ public class Parser extends BaseParser {
 	
 	private void writeODEModelFunction(PrintWriter fout, StructuralBlock sb) {
 		if (fout == null || sb == null) return;
-		String idv = z.get(lexer.getAccessor().getIndependentVariable()).toLowerCase();
+		String idv = z.get(lexer.getAccessor().getIndependentVariable());
 		
 		String format = "%s <- function(%s,%s,%s) {\n";
 		fout.write(String.format(format, "formED", idv, state_vector_symbol, param_model_symbol));

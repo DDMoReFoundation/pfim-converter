@@ -52,6 +52,7 @@ import eu.ddmore.libpharmml.dom.modellingsteps.ToEstimate;
 public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesignStep_ {
 	private static double defaultParameterEstimateValue = 1.0;
 	private static boolean useDefaultParameterEstimate = false;
+	
 	/**
 	 * Set the value for the default parameter estimate.<br/>
 	 * Only assigned if not specified in a PharmML document.
@@ -316,6 +317,7 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 	
 	private void setTaskType() {
 		if (operations == null) return;
+		
 		for (OptimalDesignOperation op : operations) {
 			if (op == null) continue;
 			OptimalDesignOpType type = op.getOpType();
