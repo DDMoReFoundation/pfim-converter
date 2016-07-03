@@ -354,8 +354,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		return ref;
 	}
 	
-	private boolean add_plotting_block = false;
-	
+	private boolean add_plotting_block = false;	
 	private List<ConversionDetail_> cached_details = new ArrayList<ConversionDetail_>();
 	private Version converterVersion = new VersionImpl(1, 7, 0);
 	private boolean created_parameter_context = false;
@@ -699,6 +698,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	
 		od_step = new OptimalDesignStepImpl(od_steps.get(0), this);
 		sd.getStepsMap().put(od_step.toString(), od_step);
+		parser.createSettingReader();
 	}
 	
 	private void createStepTrees() {  buildPartTrees(sd.getStepsMap()); }

@@ -22,7 +22,6 @@
 	</build>
 
 	<dependencies>
-
 		<dependency>
 			<groupId>crx</groupId>
 			<artifactId>converter-atomic</artifactId>

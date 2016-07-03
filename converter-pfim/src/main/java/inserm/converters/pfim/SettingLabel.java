@@ -17,28 +17,29 @@
 package inserm.converters.pfim;
 
 /**
- * Supported PFIM Optimisation Algorithms.
+ * Setting Labels for generic PFIM options.
  */
-public enum OptimisationAlgorithm {
-	FEDOROV_WYNN("FW"),
-	SIMPLEX("SIMP"),
-	UNSPECIFIED("unspecified");
+public enum SettingLabel {
+	GRAPH_SUPA("graphSupA"),
+	OUTPUT("output"),
+	OUTPUT_FIM("outputFIM"),
+	PROJECT("project");
 	
 	public static boolean contains(String value) {
-		for (OptimisationAlgorithm item : values()) if (item.toString().equals(value)) return true;
+		for (SettingLabel item : values()) if (item.toString().equals(value)) return true;
 		return false;
 	}
 	
-	private String value;
-	
-	private OptimisationAlgorithm(String value_){ value = value_; }
-	
-	public static OptimisationAlgorithm fromValue(String value){
-		for(OptimisationAlgorithm item : values())
+	public static SettingLabel fromValue(String value){
+		for(SettingLabel item : values())
 			if (item.toString().equals(value)) return item;
 			
 		throw new IllegalArgumentException("Unknown enum type \""+ value+ "\".");
 	}
+	
+	private String value;
+	
+	private SettingLabel(String value_){ value = value_; }
 	
 	@Override
 	public String toString(){ return value; }

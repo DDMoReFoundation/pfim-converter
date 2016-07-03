@@ -43,6 +43,7 @@ import eu.ddmore.libpharmml.dom.trialdesign.Administration;
 import eu.ddmore.libpharmml.dom.trialdesign.ArmDefinition;
 import eu.ddmore.libpharmml.dom.trialdesign.Arms;
 import eu.ddmore.libpharmml.dom.trialdesign.Bolus;
+import eu.ddmore.libpharmml.dom.trialdesign.DesignSpaces;
 import eu.ddmore.libpharmml.dom.trialdesign.DosingRegimen;
 import eu.ddmore.libpharmml.dom.trialdesign.DosingVariable;
 import eu.ddmore.libpharmml.dom.trialdesign.InterventionSequence;
@@ -50,27 +51,32 @@ import eu.ddmore.libpharmml.dom.trialdesign.Interventions;
 import eu.ddmore.libpharmml.dom.trialdesign.Observation;
 import eu.ddmore.libpharmml.dom.trialdesign.ObservationSequence;
 import eu.ddmore.libpharmml.dom.trialdesign.Observations;
+import eu.ddmore.libpharmml.dom.trialdesign.SingleDesignSpace;
 import eu.ddmore.libpharmml.dom.trialdesign.TrialDesign;
 
 /**
  * Wrapper class for the PharmML trial design block.
  */
 public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 {
-	private Map<ArmDefinition,String> arm_2_observation_map = new  HashMap<ArmDefinition,String>(); 
+	private Map<String, Administration> admin_map_ = new HashMap<String, Administration>(); 
+	private List<Administration> admins = new ArrayList<Administration>();
+	private Map<ArmDefinition,String> arm_2_observation_map = new  HashMap<ArmDefinition,String>();
 	private Map<String, ArmDefinition> arm_map = new HashMap<String, ArmDefinition>();
 	private Map<ArmDefinition,Double> arm_observation_start_map = new  HashMap<ArmDefinition,Double>();
 	private Map<String, Integer> arm_size_map = new HashMap<String, Integer>();
 	private List<ArmDefinition> arms = new ArrayList<ArmDefinition>();
 	private Object ctx = new Object();
+	private List<SingleDesignSpace> design_spaces = new ArrayList<SingleDesignSpace>();
+	private Map<SingleDesignSpace, Observation> designspace_2_window = new HashMap<SingleDesignSpace, Observation>(); 
 	private Map<String, String> dose_stmt_map = new HashMap<String, String>();
 	private Map<String, PharmMLRootType> dose_target_map = new HashMap<String, PharmMLRootType>();
 	private Map<String, Double> dose_time_raw = new HashMap<String, Double>();
-	private Map<String, InterventionSequenceRef> iseq_map = new HashMap<String, InterventionSequenceRef>(); 
+	private Map<String, InterventionSequenceRef> iseq_map = new HashMap<String, InterventionSequenceRef>();
 	private List<Observation> obs = new ArrayList<Observation>();
 	private Map<String, Observation> obs_map = new HashMap<String, Observation>();
 	private IParser p = null;
 	private TrialDesign td = null;
-	private TreeMaker tm = null;
+	private TreeMaker tm = null; 
 	
 	/**
 	 * Constructor
@@ -96,6 +102,23 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 		if (!arm_map.containsKey(oid)) arm_map.put(oid, arm);
 	} 
 	
+	private void buildAdministrations_() {
+		Interventions ints = td.getInterventions();
+		if (ints == null) return;
+		
+		List<Administration> admins_ = ints.getListOfAdministration();
+		if (admins_ == null) return;
+		if (admins_.isEmpty()) return;
+	
+		for (Administration admin : admins_) {
+			if (admin == null) continue;
+			String oid = admin.getOid();
+			if (oid == null) throw new NullPointerException("Administration OID is NULL");
+			admins.add(admin);
+			admin_map_.put(oid, admin);
+		}
+	}
+	
 	private void buildArms() {
 		Arms arm_list = td.getArms();
 		if (arm_list == null) return;
@@ -108,6 +131,13 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 			processInterventionSequence(arm);
 			processObservationSequence(arm);
 		}
+	} 
+	
+	private void buildDesignSpaces() {
+		DesignSpaces ds = td.getDesignSpaces();
+		if (ds == null) return;
+		
+		processDesignSpaces(ds.getListOfDesignSpace());
 	}
 	
 	private void buildInterventions() {
@@ -124,7 +154,7 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 			if (isBolus(regimen)) processBolus(oid, (Bolus) regimen);
 			else throw new UnsupportedOperationException("Unsupported dosing regimen (class='" + getClassName(regimen) + "'");
 		}
-	} 
+	}
 	
 	private void buildObservations() {
 		Observations observations = td.getObservations();
@@ -146,10 +176,24 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 	
 	@Override
 	public void buildTrees() {
+		buildAdministrations_();
 		buildObservations();
 		buildInterventions();
 		buildArms();
+		buildDesignSpaces();
 	}
+	
+	@Override
+	public Administration getAdministration(String oid) {
+		if (oid == null) return null;
+		else return admin_map_.get(oid);
+	}
+	
+	@Override
+	public Map<String, Administration> getAdministrationMap() { return admin_map_; }
+	
+	@Override
+	public List<Administration> getAdministrations() { return admins; }
 	
 	@Override
 	public double getAdministrationStartTime(String admin_oid) {
@@ -162,7 +206,7 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 	public int getArmCount() { return arms.size(); }
 	
 	@Override
-	public List<ArmDefinition> getArms() { return arms; };
+	public List<ArmDefinition> getArms() { return arms; } 
 	
 	@Override
 	public int getArmSize(String oid) {
@@ -173,11 +217,27 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 	}
 	
 	@Override
+	public Map<SingleDesignSpace, Observation> getDesignSpaceObservationMap() { return designspace_2_window; }
+	
+	@Override
+	public List<SingleDesignSpace> getDesignSpaces() { return design_spaces; }
+	
+	@Override
+	public SingleDesignSpace getDesignSpaceWithSamplingCountLimits() {
+		for (SingleDesignSpace design_space : design_spaces) {
+			if (design_space == null) continue;
+			if (design_space.getNumberTimes() != null) return design_space;
+		}
+		
+		return null;
+	}
+	
+	@Override
 	public String getDoseStatement(String administration_oid) {
 		if (administration_oid == null) return null;
 		if (dose_stmt_map.containsKey(administration_oid)) return dose_stmt_map.get(administration_oid);
 		else return null;
-	} 
+	}
 	
 	@Override
 	public PharmMLRootType getDoseTarget(String administration_oid) {
@@ -206,10 +266,10 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 		if (iseq_map.containsKey(oid)) return iseq_map.get(oid);
 		else return null;
 	}
-	
+
 	@Override
 	public TrialDesign getModel() { return td; }
-	
+
 	@Override
 	public String getName() { return "trial_design"; }
 	
@@ -225,6 +285,19 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 	}
 	
 	@Override
+	public Observation getObservation(OidRef ref) {
+		if (ref == null) return null;
+		else return getObservation(ref.getOidRef());
+	}
+	
+	@Override
+	public Observation getObservation(SingleDesignSpace space) {
+		if (space == null) return null;
+		else if (designspace_2_window.containsKey(space)) return designspace_2_window.get(space); 
+		return null;
+	}
+	
+	@Override
 	public Observation getObservation(String oid) {
 		if (oid == null) return null;
 		else if (obs_map.containsKey(oid))  return obs_map.get(oid);
@@ -232,8 +305,24 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 	}
 	
 	@Override
+	public int getObservationIndex(OidRef ob_ref) {
+		if (ob_ref == null) return -1;
+		
+		String oid = ob_ref.getOidRef();
+		if (oid == null) return -1;
+		
+		int i = 0;
+		for (Observation ob : obs) {
+			if (oid.equals(ob.getOid())) return i;
+			i++;
+		}
+		
+		return -1;
+	}
+	
+	@Override
 	public List<Observation> getObservations() { return obs; }
-
+	
 	@Override
 	public double getObservationStart(ArmDefinition arm) {
 		double start = 0.0;
@@ -249,16 +338,32 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 	
 	@Override
 	public List<String> getSymbolIds() { return new ArrayList<String>(); }
+
+	@Override
+	public boolean hasAdministration(String oid) {
+		if (oid == null) return false;
+		return admin_map_.containsKey(oid);
+	}
+
+	@Override
+	public boolean hasDesignSpaceWithSamplingCountLimits() {
+		for (SingleDesignSpace design_space : design_spaces) {
+			if (design_space == null) continue;
+			if (design_space.getNumberTimes() != null) return true;
+		}
+		
+		return false;
+	}
 	
 	@Override
 	public boolean hasDosing() { return getStateVariablesWithDosing().isEmpty() == false; }
-	
+
 	@Override
 	public boolean hasOccassions() { return td.getListOfOccasions().size() > 0; }
-	
+
 	@Override
 	public boolean hasSymbolId(String name) { return false; }
-	
+
 	private void processBolus(String oid, Bolus bolus) {
 		if (oid == null || bolus == null) return;
 		
@@ -277,7 +382,21 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 		lexer.updateNestedTrees();
 		dose_time_raw.put(oid, Double.parseDouble(p.parse(ctx, bt).trim()));
 	}
-	
+
+	private void processDesignSpaces(List<SingleDesignSpace> spaces) {
+		if (spaces == null) return;
+		if (spaces.isEmpty()) return;
+		
+		for (SingleDesignSpace space : spaces) {
+			if (space == null) continue;
+			design_spaces.add(space);
+			
+			lexer.addStatement(space, tm.newInstance(space));
+			lexer.updateNestedTrees();
+			registerObservationWithDesignSpace(space);
+		}
+	}
+
 	private void processInterventionSequence(ArmDefinition arm) {
 		if (arm == null) return;
 		String oid = arm.getOid();
@@ -294,7 +413,7 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 		OidRef oref = iseq.getInterventionList().getListOfInterventionRef().get(0);
 		iseq_map.put(oid, new InterventionSequenceRef(oref, start));
 	}
-	
+
 	// As PFIM, assuming 1 observation sequence per arm.
 	private void processObservationSequence(ArmDefinition arm) {
 		if (arm == null) return;
@@ -322,7 +441,22 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 		Integer size  = Integer.parseInt(p.parse(ctx, tm.newInstance(size_expr)).trim());
 		arm_size_map.put(arm.getOid(), size);
 	}
-	
+
+	private void registerObservationWithDesignSpace(SingleDesignSpace space) {
+		if (space == null) return;
+		List<OidRef> refs = space.getListOfObservationRef();
+		if (refs == null) throw new IllegalStateException("A design space does not reference an observation window.");
+		if (refs.isEmpty()) throw new IllegalStateException("A design space does not reference an observation window.");
+		else if (refs.size() != 1) throw new IllegalStateException("A design space for PFIM can only refer to a single observation window.");
+		
+		OidRef ref = refs.get(0);
+		if (ref == null) throw new NullPointerException("A design space observation reference is NULL");
+		Observation ob = getObservation(ref);
+		if (ob == null) throw new IllegalStateException("An design space observation reference is not valid");
+		
+		designspace_2_window.put(space, ob);
+	}
+
 	private String stripOuterBrackets(String stmt) {
 		if (stmt == null) return null;
 		stmt = stmt.trim();

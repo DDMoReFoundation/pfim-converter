@@ -41,6 +41,11 @@ import static crx.converter.engine.PharmMLTypeChecker.isTrue;
 import static crx.converter.engine.PharmMLTypeChecker.isUnaryOperation;
 import static crx.converter.engine.PharmMLTypeChecker.isVariableReference;
 import static crx.converter.engine.PharmMLTypeChecker.isVector;
+import static inserm.converters.pfim.OptimisationAlgorithm.FEDOROV_WYNN;
+import static inserm.converters.pfim.SettingLabel.GRAPH_SUPA;
+import static inserm.converters.pfim.SettingLabel.OUTPUT;
+import static inserm.converters.pfim.SettingLabel.OUTPUT_FIM;
+import static inserm.converters.pfim.SettingLabel.PROJECT;
 import inserm.converters.pfim.parts.OptimalDesignStepImpl;
 import inserm.converters.pfim.parts.ParameterBlockImpl;
 import inserm.converters.pfim.parts.TrialDesignBlockImpl;
@@ -66,7 +71,6 @@ import javax.xml.bind.JAXBElement;
 
 import crx.converter.engine.Accessor;
 import crx.converter.engine.ConversionDetail_;
-import crx.converter.engine.FixedParameter;
 import crx.converter.engine.SymbolReader.ModifiedSymbol;
 import crx.converter.engine.common.BaseParser;
 import crx.converter.engine.common.IndividualParameterAssignment;
@@ -89,6 +93,7 @@ import eu.ddmore.libpharmml.dom.commontypes.DerivativeVariable;
 import eu.ddmore.libpharmml.dom.commontypes.InitialCondition;
 import eu.ddmore.libpharmml.dom.commontypes.IntValue;
 import eu.ddmore.libpharmml.dom.commontypes.LevelReference;
+import eu.ddmore.libpharmml.dom.commontypes.OidRef;
 import eu.ddmore.libpharmml.dom.commontypes.PharmMLRootType;
 import eu.ddmore.libpharmml.dom.commontypes.RealValue;
 import eu.ddmore.libpharmml.dom.commontypes.Rhs;
@@ -125,6 +130,7 @@ import eu.ddmore.libpharmml.dom.probonto.ParameterName;
 import eu.ddmore.libpharmml.dom.probonto.ProbOnto;
 import eu.ddmore.libpharmml.dom.trialdesign.ArmDefinition;
 import eu.ddmore.libpharmml.dom.trialdesign.Observation;
+import eu.ddmore.libpharmml.dom.trialdesign.SingleDesignSpace;
 import eu.ddmore.libpharmml.dom.uncertml.VarRefType;
 
 /**
@@ -150,11 +156,20 @@ public class Parser extends BaseParser {
 	    else return toAlphabetic(quot-1) + letter;
 	}
 	
+	private OptimisationAlgorithm algorithm = FEDOROV_WYNN;
+	private double alpha = 0.05;
+	private String analytical_model_dose_variable = "X";
 	private Double atol = 1E-08;
+	private boolean computeNNI = false;
+	private boolean computeNNIEquivalence = false;
+	private boolean computePower = false;
+	private boolean computePowerEquivalence = false;
 	private Object ctx = new Object();
 	private double current_offset = 0.0;
 	private Map<ArmDefinition, String> dosing_vector_map = new HashMap<ArmDefinition, String>();
 	private FIMtype fim_type = FIMtype.P;
+	private double givenPower = 0.9;
+	private boolean identicalTimes = true;
 	private String leftArrayBracket = null;
 	private OutputFIMFormat option = OutputFIMFormat.BLOCK_DIAGONAL_FIM;
 	private String output_state_vector_symbol = "yd";
@@ -169,12 +184,11 @@ public class Parser extends BaseParser {
 	private Map<IndividualParameter, PopulationParameter> referenced_params_map = new HashMap<IndividualParameter, PopulationParameter>();
 	private String rightArrayBracket = null;
 	private Double rtol = 1E-08;
+	private SettingReader sr = null;
 	private String state_vector_symbol = null;
 	private String stdoutFilename = pfimStdoutFilename;
+	
 	private RandomEffectModelOption trand = RandomEffectModelOption.EXPONENTIAL;
-	private boolean writtenSTDIN = false;
-	private boolean wrotePFIM_R = false;
-	private String analytical_model_dose_variable = "X";
 	
 	/**
 	 * Constructor
@@ -189,7 +203,7 @@ public class Parser extends BaseParser {
 		props.load(getClass().getResourceAsStream("Parser.properties"));
 		
 		comment_char = "#";
-		script_file_suffix = "r";
+		script_file_suffix = "R";
 		objective_dataset_file_suffix = "csv";
 		output_file_suffix = "csv";
 		solver = "ode";
@@ -222,7 +236,7 @@ public class Parser extends BaseParser {
 		s.append(")");
 		return s.toString();
 	}
-	
+
 	private String cat_(List<Double> values) {
 		if (values == null) return "c()";
 		StringBuffer s = new StringBuffer("c(");
@@ -236,6 +250,16 @@ public class Parser extends BaseParser {
 		s.append(")");
 		return s.toString();
 	}
+		
+	void createSettingReader() {
+		Converter c = (Converter) lexer;
+		
+		sr = new SettingReader();
+		sr.setLexer(c);
+		sr.setParser(c.getParser());
+		sr.setStep(c.getOptimalDesignStep().getStep());
+		sr.readSettings();
+	}
 	
 	private String doArrayAccess(String variableName, Integer idx) {
 		String format = "%s%s%s%s";
@@ -246,7 +270,7 @@ public class Parser extends BaseParser {
 	}
 	
 	private String doBigInteger(BigInteger i) { return i.toString(); }
-
+	
 	private String doConstant(Constant c) {
 		String symbol = unassigned_symbol;
 		
@@ -258,14 +282,14 @@ public class Parser extends BaseParser {
 	
 		return symbol;
 	}
-		
+	
 	private String doDerivative(DerivativeVariable s) {
 		Integer idx = lexer.getStateVariableIndex(s.getSymbId());
 		String format = "%s%s";
 		return String.format(format, output_state_vector_symbol, idx);
 	}
 	
-	protected String doElement(JAXBElement<?> element) {
+	private String doElement(JAXBElement<?> element) {
 		String symbol = unassigned_symbol;
 		
 		Object value = element.getValue();
@@ -279,11 +303,9 @@ public class Parser extends BaseParser {
 		return symbol;
 	}
 	
-	protected String doFalse() { return "FALSE"; }
+	private String doFalse() { return "FALSE"; }
 	
-	protected String doFixedParameter(FixedParameter fp) { return unassigned_symbol; }
-	
-	protected String doFunctionCall(FunctionCallType call) {
+	private String doFunctionCall(FunctionCallType call) {
 		if (call == null) throw new NullPointerException("A function call definition is null.");
 		
 		ArrayList<String> arg_symbols = new ArrayList<String>();
@@ -321,7 +343,7 @@ public class Parser extends BaseParser {
 		return String.format(format, z.get(call), args_string);
 	}
 	
-	protected String doIndependentVariable(IndependentVariable v) {
+	private String doIndependentVariable(IndependentVariable v) {
 		return z.get(v.getSymbId());
 	}
 	
@@ -333,7 +355,6 @@ public class Parser extends BaseParser {
 	private String doInt(IntValue i) {
 		return i.getValue().toString();
 	}
-	
 	
 	private String doJavaBoolean(Boolean value) {
 		if (value) return doTrue();
@@ -533,11 +554,6 @@ public class Parser extends BaseParser {
 		return String.format("%s%s%s.%s", output_dir, File.separator, MODEL_FILESTEM, script_file_suffix);
 	}
 	
-	private String getPFIMProjectFilepath() throws IOException {
-		String cwd = lexer.getOutputDirectory();
-		return cwd + PREFERRED_SEPERATOR + pfimProjectFilename + "." + script_file_suffix;
-	}
-	
 	private String getParameterValueFromEstimate(SymbolRef ref) {
 		String slope = "0.0";
 		if (ref == null) return slope;
@@ -555,9 +571,15 @@ public class Parser extends BaseParser {
 		return slope;
 	}
 	
+	private String getPFIMProjectFilepath() throws IOException {
+		String cwd = lexer.getOutputDirectory();
+		return cwd + PREFERRED_SEPERATOR + pfimProjectFilename + "." + script_file_suffix;
+	}
+	
 	private String getStdinFilepath() {
 		String cwd = lexer.getOutputDirectory();
-		return cwd + PREFERRED_SEPERATOR + pfimStdinFilename + "." + script_file_suffix;
+		String filename = pfimStdinFilename;
+		return cwd + PREFERRED_SEPERATOR + filename + "." + script_file_suffix;
 	}
 	
 	@Override
@@ -770,7 +792,7 @@ public class Parser extends BaseParser {
 		}
 		
 		return omega;
-	}
+	} 
 	
 	private void recordVectorValues(List<String> values) {
 		if (values == null) return;
@@ -783,8 +805,9 @@ public class Parser extends BaseParser {
 				e.printStackTrace();
 			}
 		}
-	}
+	} 
 	
+	@Override
 	public void removeAbsolutePaths(File f) throws IOException {
 		// Do nothing as paths, string delimiters language specific
 		// so method needs to be overridden in a parser instance.
@@ -834,7 +857,7 @@ public class Parser extends BaseParser {
 	 */
 	public void setFIMType(FIMtype type) {
 		if (type != null) fim_type = type;
-	} 
+	}
 	
 	/**
 	 * Set the type of FIM matrix generated by PFIM.
@@ -842,7 +865,7 @@ public class Parser extends BaseParser {
 	 */
 	public void setFIMType(String type) {
 		if (type != null) fim_type = FIMtype.valueOf(type.toUpperCase());
-	} 
+	}
 	
 	/**
 	 * Specify the R-generated output filename in the CWD.
@@ -867,13 +890,19 @@ public class Parser extends BaseParser {
 		record_vector_values = decision;
 		current_offset = offset;
 	}
-	
+
 	/**
 	 * Specify the STDOUT filename
 	 * @param filename
 	 */
 	public void setStdoutFilename(String filename) {
 		if (filename != null) stdoutFilename = filename;
+	}
+	
+	private void writeAlgorithmOption(PrintWriter fout) {
+		if (fout == null) return;
+		String format = "algo.option<-\"%s\"\n";
+		fout.write(String.format(format, algorithm));
 	}
 	
 	private void writeAllModelFunctions(File output_dir) throws IOException {
@@ -883,6 +912,62 @@ public class Parser extends BaseParser {
 		PrintWriter mout = new PrintWriter(output_filename);	
 		writeModelFunction(mout, sb);	
 		mout.close();
+	}
+	
+	private void writeAlpha(PrintWriter fout) {
+		if (fout == null) return;
+		
+		String format = "alpha<-%s\n";
+		fout.write(String.format(format, alpha));
+	}
+	
+	private void writeAnalyticalModelFunction(PrintWriter fout, StructuralBlock sb) {
+		if (fout == null || sb == null) return;
+		String idv = z.get(lexer.getAccessor().getIndependentVariable());
+		
+		TrialDesignBlock2 tdb = (TrialDesignBlock2) lexer.getTrialDesign();
+		if (tdb == null) throw new NullPointerException("The trial design block was NULL.");
+		
+		List<PharmMLRootType> targets = tdb.getDoseTargets();
+		int variable_count = 0;
+		VariableDefinition dose_variable = null;
+		for (PharmMLRootType target : targets) {
+			if (isLocalVariable(target)) {
+				dose_variable = (VariableDefinition) target;
+				variable_count++;
+			}
+		}
+		
+		if (variable_count != 1) throw new IllegalStateException("PFIM can only support 1 dose target variable for analytical models (AF).");
+		z.addReservedWord(dose_variable.getSymbId(), analytical_model_dose_variable);
+		
+		String format = "%s <- function(%s,%s,%s) {\n";
+		fout.write(String.format(format, "form", idv, param_model_symbol, analytical_model_dose_variable));
+		
+		writeIndividualParameterAssignments(fout);
+		writeLocalVariableAssignments(fout, sb);
+		writeAnalyticalReturnStatement(fout, sb);
+		
+		fout.write("}\n");
+	}
+	
+	private void writeAnalyticalReturnStatement(PrintWriter fout, StructuralBlock sb) {
+		if (fout == null || sb == null) return;
+		
+		ObservationBlock ob = lexer.getObservationBlocks().get(0);
+		if (ob == null) 
+		throw new IllegalStateException("No observation model declared in the PharmML so unable to determine variable(s) to export.");
+		
+		List<SimulationOutput> outputs = ob.getSimulationOutputs();
+		if (outputs.isEmpty()) 
+		throw new IllegalStateException("The observation model has no declared output variables. Unable to generate model function return statement");
+		
+		if (outputs.size() == 1) {
+			String format = "\treturn(%s)\r\n";
+			fout.write(String.format(format, z.get(outputs.get(0))));
+		} else {
+			throw new UnsupportedOperationException("Multiple output variables in analytical functions not supported yet.");
+		}
 	}
 	
 	/**
@@ -944,7 +1029,23 @@ public class Parser extends BaseParser {
 		String format = "beta<-%s\n";
 		fout.write(String.format(format, cat(betas)));
 	}
-
+	
+	private void writeBetaCovariate(PrintWriter fout) {
+		if (fout == null) return;
+		String betaCovariateValue = "";
+		
+		String format = "beta.covariate<-list(%s)\n";
+		fout.write(String.format(format, betaCovariateValue));
+	}
+	
+	private void writeBetaCovariateOccassions(PrintWriter fout) {
+		if (fout == null) return;
+		String betaCovariateOccassionValues = "";
+		
+		String format = "beta.covariate_occ<-list(%s)\n";
+		fout.write(String.format(format, betaCovariateOccassionValues));
+	}
+	
 	private void writeBetaFixed(PrintWriter fout) {
 		if (fout == null) return;
 		
@@ -978,6 +1079,42 @@ public class Parser extends BaseParser {
 	private void writeBoundsDefault(PrintWriter fout) {
 		if (fout == null) return;
 		fout.write("boundA<-list(c(0,Inf))\n");
+	}
+	
+	private void writeComputeNNI(PrintWriter fout) {
+		if (fout == null) return;
+		TreeMaker tm = lexer.getTreeMaker();
+		String value = parse(ctx, tm.newInstance(computeNNI)).trim();
+		
+		String format = "compute.nni<-%s\n";
+		fout.write(String.format(format, value));
+	}
+	
+	private void writeComputeNNIEquivalence(PrintWriter fout) {
+		if (fout == null) return;
+		TreeMaker tm = lexer.getTreeMaker();
+		String value = parse(ctx, tm.newInstance(computeNNIEquivalence)).trim();
+		
+		String format = "compute.nni_eq<-%s\n";
+		fout.write(String.format(format, value));
+	}
+	
+	private void writeComputePower(PrintWriter fout) {
+		if (fout == null) return;
+		TreeMaker tm = lexer.getTreeMaker();
+		String value = parse(ctx, tm.newInstance(computePower)).trim();
+		
+		String format = "compute.power<-%s\n";
+		fout.write(String.format(format, value));
+	} 
+	
+	private void writeComputePowerEquivalence(PrintWriter fout) {
+		if (fout == null) return;
+		TreeMaker tm = lexer.getTreeMaker();
+		String value = parse(ctx, tm.newInstance(computePowerEquivalence)).trim();
+		
+		String format = "compute.power_eq<-%s\n";
+		fout.write(String.format(format, value));
 	}
 	
 	private void writeCondInitExpression(PrintWriter fout) {
@@ -1052,6 +1189,77 @@ public class Parser extends BaseParser {
 		fout.write(String.format(format, result));
 	}
 	
+	private void writeCovariateCategory(PrintWriter fout) {
+		if (fout == null) return;
+		String categoryNameValues = "";
+		
+		String format = "covariate.category<-list(%s)\n";
+		fout.write(String.format(format, categoryNameValues));
+	}
+	private void writeCovariateModel(PrintWriter fout) {
+		if (fout == null) return;
+		String covariateModelFlag = "F";
+		
+		String format = "covariate.model<-%s\n";
+		fout.write(String.format(format, covariateModelFlag));
+	}
+	
+	private void writeCovariateName(PrintWriter fout) {
+		if (fout == null) return;
+		String covariateNameValues = "";
+		
+		String format = "covariate.name<-list(%s)\n";
+		fout.write(String.format(format, covariateNameValues));
+	}
+	
+	private void writeCovariateOccassionCategory(PrintWriter fout) {
+		if (fout == null) return;
+		String covariateOccassionCategoryValues = "";
+		
+		String format = "covariate_occ.category<-list(%s)\n";
+		fout.write(String.format(format, covariateOccassionCategoryValues));
+	}
+	
+	private void writeCovariateOccassionModel(PrintWriter fout) {
+		if (fout == null) return;
+		String covariateOccassionModel = "F";
+		
+		String format = "covariate_occ.model<-%s\n";
+		fout.write(String.format(format, covariateOccassionModel));
+	}
+	
+	private void writeCovariateOccassionName(PrintWriter fout) {
+		if (fout == null) return;
+		String covariateOccassionNames = "";
+		
+		String format = "covariate_occ.name<-list(%s)\n";
+		fout.write(String.format(format, covariateOccassionNames));
+	}
+	
+	private void writeCovariateOccassionProportions(PrintWriter fout) {
+		if (fout == null) return;
+		String covariateOccassionProportions = "";
+		
+		String format = "covariate_occ.proportions<-list(%s)\n";
+		fout.write(String.format(format, covariateOccassionProportions));
+	} 
+	
+	private void writeCovariateOccassionSequence(PrintWriter fout) {
+		if (fout == null) return;
+		String covariateOccassionSequenceValues = "";
+		
+		String format = "covariate_occ.sequence<-list(%s)\n";
+		fout.write(String.format(format, covariateOccassionSequenceValues));
+	}
+	
+	private void writeCovariateProportions(PrintWriter fout) {
+		if (fout == null) return;
+		String covariateProportionValue = "";
+		
+		String format = "covariate.proportions<-list(%s)\n";
+		fout.write(String.format(format, covariateProportionValue));
+	}
+	
 	private void writeDerivatives(PrintWriter fout, StructuralBlock sb) {
 		if (fout == null || sb == null) return;
 		
@@ -1084,6 +1292,13 @@ public class Parser extends BaseParser {
 		
 		String format = "dose<-c(%s)\n";
 		fout.write(String.format(format, doses));
+	}
+	
+	private void writeEquivalenceInterval(PrintWriter fout) {
+		if (fout == null) return;
+		
+		String format = "interval_eq<-c(log(0.8),log(1.25))\n";
+		fout.write(format);
 	}
 	
 	private void writeErrorModelDerivedSettings(PrintWriter fout) {
@@ -1121,6 +1336,15 @@ public class Parser extends BaseParser {
 		}
 	}
 	
+	private void writeGivenPower(PrintWriter fout) {
+		if (fout == null) return;
+		TreeMaker tm = lexer.getTreeMaker();
+		String value = parse(ctx, tm.newInstance(givenPower)).trim();
+		
+		String format = "given.Power<-%s\n";
+		fout.write(String.format(format, value));
+	}
+	
 	private void writeGraphInf(PrintWriter fout) {
 		if (fout == null) return;
 		String format = "graph.infA<-c(0)\n";
@@ -1151,10 +1375,13 @@ public class Parser extends BaseParser {
 		
 		double max_time = 0.0;
 		for (double time : recorded_vector_values) if (time > max_time) max_time = time;
+		if (sr != null) {
+			if (sr.hasValue(GRAPH_SUPA)) max_time = Double.parseDouble(sr.getValue(GRAPH_SUPA));
+		}
 		
 		String format = "graph.supA<-c(%s)\n";
 		fout.write(String.format(format, max_time));
-	} 
+	}
 	
 	private void writeIdenticalDose(PrintWriter fout) {
 		BooleanValue value = null;
@@ -1175,13 +1402,22 @@ public class Parser extends BaseParser {
 		fout.write(String.format(format, flag));
 	}
 	
+	private void writeIdenticalTimes(PrintWriter fout) {
+		if (fout == null) return;
+		TreeMaker tm = lexer.getTreeMaker();
+		String value = parse(ctx, tm.newInstance(identicalTimes)).trim();
+		
+		String format = "identical.times<-%s\n";
+		fout.write(String.format(format, value));
+	}
+	
 	private void writeIndividualParameterAssignments(PrintWriter fout) {
 		if (fout == null) return;
 		ParameterBlockImpl pb = (ParameterBlockImpl) lexer.getParameterBlock();
 		for (Object o : pb.getIndividualParameterAssignments()) parse(o, lexer.getStatement(o), fout);
 		fout.write("\n");
 	}
-	
+		
 	private void writeLocalVariableAssignments(PrintWriter fout, StructuralBlock sb) {
 		if (fout == null || sb == null) return;
 		
@@ -1197,6 +1433,7 @@ public class Parser extends BaseParser {
 		String format = "log.logical<-F\n";
 		fout.write(format);
 	}
+	
 	/**
 	 * Generate a call to PFIM.
 	 * @param fout Output
@@ -1226,62 +1463,12 @@ public class Parser extends BaseParser {
 		writeScriptHeader(fout, lexer.getModelFilename());
 		if (sb.isODE()) writeODEModelFunction(fout, sb);
 		else writeAnalyticalModelFunction(fout, sb);
-	}
-	
-	// TODO: Work
-	private void writeAnalyticalModelFunction(PrintWriter fout, StructuralBlock sb) {
-		if (fout == null || sb == null) return;
-		String idv = z.get(lexer.getAccessor().getIndependentVariable());
-		
-		TrialDesignBlock2 tdb = (TrialDesignBlock2) lexer.getTrialDesign();
-		if (tdb == null) throw new NullPointerException("The trial design block was NULL.");
-		
-		List<PharmMLRootType> targets = tdb.getDoseTargets();
-		int variable_count = 0;
-		VariableDefinition dose_variable = null;
-		for (PharmMLRootType target : targets) {
-			if (isLocalVariable(target)) {
-				dose_variable = (VariableDefinition) target;
-				variable_count++;
-			}
-		}
-		
-		if (variable_count != 1) throw new IllegalStateException("PFIM can only support 1 dose target variable for analytical models (AF).");
-		z.addReservedWord(dose_variable.getSymbId(), analytical_model_dose_variable);
-		
-		String format = "%s <- function(%s,%s,%s) {\n";
-		fout.write(String.format(format, "form", idv, param_model_symbol, analytical_model_dose_variable));
-		
-		writeIndividualParameterAssignments(fout);
-		writeLocalVariableAssignments(fout, sb);
-		writeAnalyticalReturnStatement(fout, sb);
-		
-		fout.write("}\n");
-	}
-	
-	private void writeAnalyticalReturnStatement(PrintWriter fout, StructuralBlock sb) {
-		if (fout == null || sb == null) return;
-		
-		ObservationBlock ob = lexer.getObservationBlocks().get(0);
-		if (ob == null) 
-		throw new IllegalStateException("No observation model declared in the PharmML so unable to determine variable(s) to export.");
-		
-		List<SimulationOutput> outputs = ob.getSimulationOutputs();
-		if (outputs.isEmpty()) 
-		throw new IllegalStateException("The observation model has no declared output variables. Unable to generate model function return statement");
-		
-		if (outputs.size() == 1) {
-			String format = "\treturn(%s)\r\n";
-			fout.write(String.format(format, z.get(outputs.get(0))));
-		} else {
-			throw new UnsupportedOperationException("Multiple output variables in analytical functions not supported yet.");
-		}
-	}
+	} 
 	
 	private void writeNamesDataX(PrintWriter fout) {
 		if (fout == null) return;
 		fout.write("names.datax<-c(\"Time\")\n");
-	} 
+	}
 	
 	private void writeNamesDataY(PrintWriter fout) {
 		if (fout == null) return;
@@ -1392,25 +1579,174 @@ public class Parser extends BaseParser {
 		fout.write(String.format(format, cat(omegas)));
 	}
 	
+	private void writeOptimisationOptions(PrintWriter fout) {
+		if (fout == null) return;
+		
+		OptimalDesignLexer od_lexer = (OptimalDesignLexer) lexer;
+		OptimalDesignStep_ step = od_lexer.getOptimalDesignStep();
+		
+		if (step == null) throw new NullPointerException("Optional Design Step is NULL");
+		if (!step.isOptimisation()) return;
+		
+		writeIdenticalTimes(fout);
+		writeAlgorithmOption(fout);
+		
+		if (FEDOROV_WYNN.equals(algorithm)) writeFedorovWynnOptions(fout);
+	}
+
+	private void writeFedorovWynnOptions(PrintWriter fout) {
+		if (fout == null) return;
+		
+		OptimalDesignLexer od_lexer = (OptimalDesignLexer) lexer;
+		OptimalDesignStep_ step = od_lexer.getOptimalDesignStep();
+		if (step == null) throw new NullPointerException("Optional Design Step is NULL");
+		if (!step.isOptimisation()) return;
+		
+		TrialDesignBlock2 tdb =  (TrialDesignBlock2) lexer.getTrialDesign();
+		List<SingleDesignSpace> spaces = tdb.getDesignSpaces();
+		if (spaces.size() < 2) throw new IllegalStateException("Not all design spaces assigned by for trial design optimisation.");
+		
+		writeNumberOfSamplingWindows(fout, spaces);
+		writeSamplingWindows(fout, tdb, spaces);
+	}
+	
+	private void writeSamplingWindows(PrintWriter fout, TrialDesignBlock2 tdb, List<SingleDesignSpace> spaces) {
+		if (fout == null || tdb == null) return;
+		
+		List<Observation> windows = new ArrayList<Observation>();
+		for (SingleDesignSpace space : spaces) {
+			Observation ob = tdb.getObservation(space);
+			if (ob == null) continue;
+			if (!windows.contains(ob)) windows.add(ob);
+		}
+		
+		if (windows.size() == 0) return;
+		for (Observation window : windows) {
+			int idx = tdb.getObservationIndex(new OidRef(window));
+			if (idx == -1) throw new IllegalStateException("Observation index is -1 (broken window reference in PharmML).");
+			char letter = (char) ('A' + idx);
+			List<String> sampling_windows = new ArrayList<String>();
+			for (SingleDesignSpace space : spaces) {
+				if (space.getObservationTimes() != null) {
+					Observation ob = tdb.getObservation(space);
+					if (window.equals(ob)) {
+						String stmt = parse(ctx, lexer.getStatement(space.getObservationTimes())).trim();
+						sampling_windows.add(stmt);
+					}
+				}
+			}
+			
+			StringBuffer sb = new StringBuffer();
+			int i = 0;
+			for (String sampling_window : sampling_windows) {
+				if (i > 0) sb.append(",");
+				sb.append(sampling_window);
+			}
+			
+			String format = "sampwin%s<-list(%s)\n";
+			fout.write(String.format(format, letter, sb));
+			writeFixedTimes(fout, letter);
+			
+			List<String> sampling_count_limits = new ArrayList<String>();
+			recorded_vector_values.clear();
+			record_vector_values = true;
+			for (SingleDesignSpace space : spaces) {
+				if (space.getNumberTimes() != null) {
+					Observation ob = tdb.getObservation(space);
+					if (window.equals(ob)) {
+						String stmt = parse(ctx, lexer.getStatement(space.getNumberTimes())).trim();
+						sampling_count_limits.add(stmt);
+					}
+				}
+			}
+			record_vector_values = false;
+			
+			sb = new StringBuffer();
+			i = 0;
+			for (String sampling_count_limit : sampling_count_limits) {
+				if (i > 0) sb.append(",");
+				sb.append(sampling_count_limit);
+			}
+			format = "nsamp%s<-list(%s)\n";
+			fout.write(String.format(format, letter, sb));
+			writeSamplingPointsPerSubject(fout, letter);
+		}
+	}
+	
+	private void writeFixedTimes(PrintWriter fout, char letter) {
+		if (fout == null) return;
+		String format = "fixed.times%s<-c()\n";
+		fout.write(String.format(format, letter));
+	}
+	
+	//fixed.timesA<-c()
+	
+	private void writeSamplingPointsPerSubject(PrintWriter fout, char letter) {
+		if (fout == null) return;
+		if (recorded_vector_values.isEmpty()) return;
+		Double min = recorded_vector_values.get(0);
+		Double max = recorded_vector_values.get(0);
+		
+		for (Double value : recorded_vector_values) {
+			if (value < min) min = value;
+			if (value > max) max = value;
+		}
+		
+		String format = "nmaxpts%s<-%s\n";
+		fout.write(String.format(format, letter, max.intValue()));
+		
+		format = "nminpts%s<-%s\n";
+		fout.write(String.format(format, letter, min.intValue()));
+	}
+	
+	private void writeNumberOfSamplingWindows(PrintWriter fout, List<SingleDesignSpace> spaces) {
+		if (fout == null || spaces == null) return;
+		
+		int nWindows = 0;
+		for (SingleDesignSpace space : spaces) if(space.getObservationTimes() != null) nWindows++; 
+		
+		String format = "nwindA<-%s\n";
+		fout.write(String.format(format, nWindows));
+	}
+	
 	private void writeOption(PrintWriter fout) {
 		if (fout == null) return;
 		String format = "option<-%s\n";
 		fout.write(String.format(format, option));
 	}
 	
-	private void writeOutputFilename(PrintWriter fout) {
+	private void writeOutput(PrintWriter fout) {
 		if (fout == null) return;
 		String format = "output<-\"%s\"\n";
-		fout.write(String.format(format, stdoutFilename));
+		String filename = stdoutFilename;
+		if (sr != null) if (sr.hasValue(OUTPUT)) filename = sr.getValue(OUTPUT);
+		fout.write(String.format(format, filename));
 	}
 	
 	private void writeOutputFIMFilename(PrintWriter fout) {
 		if (fout == null) return;
 		
 		String format = "outputFIM<-\"%s\"\n";
-		fout.write(String.format(format, outputFIMFilename));
+		String filename = outputFIMFilename;
+		if (sr != null) if (sr.hasValue(OUTPUT_FIM)) filename = sr.getValue(OUTPUT_FIM);
+		fout.write(String.format(format, filename));
 	}
 	
+	private void writeParameterAssociated(PrintWriter fout) {
+		if (fout == null) return;
+		String parameterAssociated = "";
+		
+		String format = "parameter.associated<-list(%s)\n";
+		fout.write(String.format(format, parameterAssociated));
+	}
+	
+	private void writeParameterOccassionAssociated(PrintWriter fout) {
+		if (fout == null) return;
+		String parameterOccassionAssociatedValues = "";
+		
+		String format = "parameter_occ.associated<-list(%s)\n";
+		fout.write(String.format(format, parameterOccassionAssociatedValues));
+	}
 	private void writeParameters(PrintWriter fout) {
 		if (fout == null) return;
 		
@@ -1427,8 +1763,6 @@ public class Parser extends BaseParser {
 	}
 	
 	private void writePFIMProjectFile() throws IOException {
-		if (wrotePFIM_R) return;
-		
 		if (programDirectory == null) throw new NullPointerException("PFIM Program Directory not specified.");
 		String outputFilepath = getPFIMProjectFilepath();
 		PrintWriter fout = new PrintWriter(outputFilepath);
@@ -1448,9 +1782,8 @@ public class Parser extends BaseParser {
 			fout.write(line + "\n");
 		}
 		fout.close();
-		
-		wrotePFIM_R = true;
 	}
+	
 	
 	@Override
 	public void writePreMainBlockElements(PrintWriter fout, File output_dir) throws IOException{
@@ -1468,10 +1801,12 @@ public class Parser extends BaseParser {
 		fout.write(String.format(format, previousFIM));
 	}
 	
-	private void writeProjectName(PrintWriter fout) {
+	private void writeProject(PrintWriter fout) {
 		if (fout == null) return;
 		String format = "project<-\"%s\"\n";
-		fout.write(String.format(format, lexer.getModelName()));
+		String project = lexer.getModelName();
+		if (sr != null) if (sr.hasValue(PROJECT)) project = sr.getValue(PROJECT);
+		fout.write(String.format(format, project));
 	}
 	
 	private void writeProt(PrintWriter fout) {
@@ -1585,7 +1920,7 @@ public class Parser extends BaseParser {
 		format = "%s Dated: %s\n\n";
 		fout.write(String.format(format, comment_char, new Date()));
 	}
-		
+	
 	private void writeScriptLibraryReferences(PrintWriter fout) throws IOException {
 		if (fout == null) return;
 		
@@ -1615,15 +1950,13 @@ public class Parser extends BaseParser {
 	 * @throws IOException
 	 */
 	public void writeSTDIN() throws IOException {
-		if (writtenSTDIN) return;
-		
 		String outFilepath = getStdinFilepath();
 		
 		PrintWriter fout = new PrintWriter(outFilepath);
 		writeScriptHeader(fout, lexer.getModelFilename());
-		writeProjectName(fout);
+		writeProject(fout);
 		writeFileModel(fout);
-		writeOutputFilename(fout);
+		writeOutput(fout);
 		writeOutputFIMFilename(fout);
 		writeFIMType(fout);
 		writePreviousFIM(fout);
@@ -1651,6 +1984,27 @@ public class Parser extends BaseParser {
 		writeProt(fout);
 		writeSubjects(fout);
 		writeSubjectsInput(fout);
+		writeCovariateModel(fout);
+		writeCovariateName(fout);
+		writeCovariateCategory(fout);
+		writeCovariateProportions(fout);
+		writeParameterAssociated(fout);
+		writeBetaCovariate(fout);
+		writeCovariateOccassionModel(fout);
+		writeCovariateOccassionName(fout);
+		writeCovariateOccassionCategory(fout);
+		writeCovariateOccassionSequence(fout);
+		writeCovariateOccassionProportions(fout);
+		writeParameterOccassionAssociated(fout);
+		writeBetaCovariateOccassions(fout);
+		writeAlpha(fout);
+		writeComputePower(fout);
+		writeComputeNNI(fout);
+		writeEquivalenceInterval(fout);
+		writeComputePowerEquivalence(fout);
+		writeComputeNNIEquivalence(fout);
+		writeGivenPower(fout);
+		writeOptimisationOptions(fout);
 		writeGraphLogical(fout);
 		writeGraphSensiLogical(fout);
 		writeNamesDataX(fout);
@@ -1660,10 +2014,8 @@ public class Parser extends BaseParser {
 		writeGraphSup(fout);
 		writeYRange(fout);
 		fout.close();
-		
-		writtenSTDIN = true;
 	}
-	
+
 	private void writeSubjects(PrintWriter fout) {
 		if (fout == null) return;
 		
