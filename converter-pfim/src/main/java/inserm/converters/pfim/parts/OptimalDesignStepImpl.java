@@ -20,6 +20,7 @@ import static crx.converter.engine.PharmMLTypeChecker.isIndividualParameter;
 import static crx.converter.engine.PharmMLTypeChecker.isPopulationParameter;
 import static eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignOpType.EVALUATION;
 import static eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignOpType.OPTIMISATION;
+import inserm.converters.pfim.OptimisationAlgorithm;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -39,6 +40,7 @@ import eu.ddmore.libpharmml.dom.commontypes.RealValue;
 import eu.ddmore.libpharmml.dom.commontypes.SymbolRef;
 import eu.ddmore.libpharmml.dom.modeldefn.IndividualParameter;
 import eu.ddmore.libpharmml.dom.modeldefn.PopulationParameter;
+import eu.ddmore.libpharmml.dom.modellingsteps.Algorithm;
 import eu.ddmore.libpharmml.dom.modellingsteps.InitialEstimate;
 import eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignOpType;
 import eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignOperation;
@@ -60,6 +62,7 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 	 */
 	public static void setDefaultParameterEstimateValue(double value) { defaultParameterEstimateValue = value; }
 	
+	private String algorithm = null;
 	private Map<ParameterEstimate, Integer> estimate_to_index = new HashMap<ParameterEstimate, Integer>();
 	private boolean evaluation = false;
 	private List<FixedParameter> fixed_parameters = new ArrayList<FixedParameter>();
@@ -162,6 +165,9 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 		}
 	}
 	
+	@Override
+	public String getAlgorithm() { return algorithm; }
+
 	private InitialEstimate getDefaultInitialEstimate() {
 		InitialEstimate ic = new InitialEstimate();
 		ic.setFixed(false);
@@ -202,13 +208,13 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 
 	@Override
 	public String getName() { return step.getOid(); }
-
+	
 	/**
 	 * Get the operations array bound to the OD step.
 	 * @return
 	 */
 	public OptimalDesignOperation[] getOperations() { return operations; }
-	
+
 	/**
 	 * Get the parameter estimate objedt associated with a parameter object.
 	 * @param p Parameter
@@ -298,7 +304,7 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 	 * @return boolean
 	 */
 	public boolean isEvaluation() { return evaluation; }
-
+	
 	@Override
 	public boolean isFixed(IndividualParameter ip) {
 		if (ip == null) return false;
@@ -315,6 +321,22 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 	 */
 	public boolean isOptimisation() { return optimisation; }
 	
+	private void readAlogrithm(OptimalDesignOperation op) {
+		if (op == null) return;
+		Algorithm algo = op.getAlgorithm();
+		if (algo == null) return;
+
+		String definition = algo.getDefinition();
+		if (definition == null) throw new NullPointerException("OD algorithm definition not specified.");
+		if (definition.isEmpty()) throw new NullPointerException("OD algorithm definition is a zero-length string.");
+		
+		definition = definition.toUpperCase();
+		if (!OptimisationAlgorithm.contains(definition)) 
+			throw new UnsupportedOperationException("The specified algorithm is not supported by PFIM (algo='" + definition + "')");
+		else
+			algorithm = definition;
+	}
+	
 	private void setTaskType() {
 		if (operations == null) return;
 		
@@ -324,9 +346,11 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 			if (type == null) continue;
 			if (EVALUATION.equals(type)) evaluation = true;
 			else if (OPTIMISATION.equals(type)) optimisation = true;
+			
+			readAlogrithm(op);
 		}
 	}
-	
+
 	@Override
 	public String toString() { return step.getOid(); }
 }
