@@ -138,8 +138,8 @@ import eu.ddmore.libpharmml.dom.uncertml.VarRefType;
  * PFIM R-based code generator.
  */
 public class Parser extends BaseParser {
-	private final static String directory_program_replacement_label = "DIRECTORY_PROGRAM_REPLACE";
-	private final static String directory_replacement_label = "DIRECTORY_REPLACE";
+	private static final String directory_program_replacement_label = "DIRECTORY_PROGRAM_REPLACE";
+	private static final String directory_replacement_label = "DIRECTORY_REPLACE";
 	private static final String MODEL_FILESTEM = "model";
 	private static final String pfimFIMFilename = "FIM.txt";
 	private static final String pfimProjectFilename = "PFIM";
@@ -197,6 +197,7 @@ public class Parser extends BaseParser {
 	private String state_vector_symbol = null;
 	private String stdoutFilename = pfimStdoutFilename;
 	private RandomEffectModelOption trand = RandomEffectModelOption.EXPONENTIAL;
+	private String optimisation_result_variable = "ypkpd";
 	
 	/**
 	 * Constructor
@@ -1517,8 +1518,15 @@ public class Parser extends BaseParser {
 	public void writeModelCall(PrintWriter fout) {
 		if (fout == null) return;
 		
-		String format = "PFIM(model.file=\"stdin.r\")";
-		fout.write(format);
+		Converter c = (Converter) lexer;
+		OptimalDesignStep_ step = c.getOptimalDesignStep();
+		if (step.isOptimisation()) {
+			String format = "%s<-PFIM(model.file=\"stdin.r\")";
+			fout.write(String.format(format, optimisation_result_variable));
+		} else {
+			String format = "PFIM(model.file=\"stdin.r\")";
+			fout.write(format);
+		}
 	}
 	
 	private void writeModelForm(PrintWriter fout) {
