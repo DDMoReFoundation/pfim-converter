@@ -20,6 +20,7 @@ package inserm.converters.pfim;
  * Supported PFIM error models.
  */
 public enum SupportedErrorModel {
+	ADDITIVE_ERROR("additiveError"),
 	COMBINED_ERROR("combinedError1"),
 	PROPORTIONAL("proportionalErrorModel"),
 	PROPORTIONAL_ERROR("proportionalError");

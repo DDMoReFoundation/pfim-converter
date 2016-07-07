@@ -35,6 +35,7 @@ import static crx.converter.engine.PharmMLTypeChecker.isObservationError;
 import static crx.converter.engine.PharmMLTypeChecker.isPopulationParameter;
 import static crx.converter.engine.PharmMLTypeChecker.isRandomVariable;
 import static crx.converter.engine.PharmMLTypeChecker.isStructuredError;
+import static crx.converter.engine.PharmMLTypeChecker.isSymbol;
 import static crx.converter.engine.PharmMLTypeChecker.isSymbolReference;
 import static crx.converter.engine.PharmMLTypeChecker.isVariabilityLevelDefinition;
 import static crx.converter.engine.PharmMLTypeChecker.isVariableReference;
@@ -118,6 +119,7 @@ import eu.ddmore.libpharmml.dom.commontypes.IntValue;
 import eu.ddmore.libpharmml.dom.commontypes.Name;
 import eu.ddmore.libpharmml.dom.commontypes.PharmMLElement;
 import eu.ddmore.libpharmml.dom.commontypes.PharmMLRootType;
+import eu.ddmore.libpharmml.dom.commontypes.Symbol;
 import eu.ddmore.libpharmml.dom.commontypes.SymbolRef;
 import eu.ddmore.libpharmml.dom.commontypes.VariableDefinition;
 import eu.ddmore.libpharmml.dom.dataset.ColumnDefinition;
@@ -136,6 +138,7 @@ import eu.ddmore.libpharmml.dom.maths.Piece;
 import eu.ddmore.libpharmml.dom.maths.Piecewise;
 import eu.ddmore.libpharmml.dom.modeldefn.CommonParameter;
 import eu.ddmore.libpharmml.dom.modeldefn.ContinuousCovariate;
+import eu.ddmore.libpharmml.dom.modeldefn.ContinuousObservationModel;
 import eu.ddmore.libpharmml.dom.modeldefn.CovariateDefinition;
 import eu.ddmore.libpharmml.dom.modeldefn.CovariateModel;
 import eu.ddmore.libpharmml.dom.modeldefn.CovariateRelation;
@@ -384,8 +387,16 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	private boolean save_renamed_symbol_list = true;
 	private ScriptDefinition sd = new ScriptDefinition();
 	private boolean sort_structural_model = true;
-	private LanguageVersion source = null;
-	private LanguageVersion target = null;
+	
+	/**
+	 * Language source
+	 */
+	protected LanguageVersion source = null;
+	
+	/**
+	 * Target language
+	 */
+	protected LanguageVersion target = null;
 	private PharmMLVersion target_level = PharmMLVersion.V0_8_1;
 	private Translator tr = new Translator();
 	private boolean translate_macros = true;
@@ -1040,6 +1051,8 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		return exported_variables;
 	}
+	
+	
 	
 	@Override
 	public String getIndexSymbol(Object key) { throw new UnsupportedOperationException(); }
@@ -2056,4 +2069,27 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 
 	@Override
 	public boolean useCachedDependencyList() { throw new UnsupportedOperationException(); }
+
+	@Override
+	public List<Symbol> getContinuousOutputs() {
+		List<Symbol> outputs = new ArrayList<Symbol>();
+		List<ObservationBlock> obs = getObservationBlocks();
+		
+		for (ObservationBlock ob : obs) {
+			if (ob == null) continue;
+			ObservationModel model = ob.getModel();
+			if (model == null) continue;
+			ContinuousObservationModel com = model.getContinuousData();
+			if (com == null) continue; 
+			ObservationError oe = com.getObservationError();
+			if (oe == null) continue;
+			if (isStructuredError(oe)) {
+				StructuredObsError soe = (StructuredObsError) oe;
+				PharmMLRootType element = accessor.fetchElement(soe.getOutput());
+				if (isSymbol(element)) outputs.add((Symbol) element); 
+			}
+		}
+		
+		return outputs;
+	}
 }
