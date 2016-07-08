@@ -2012,9 +2012,10 @@ public class Parser extends BaseParser {
 		
 		recorded_vector_values.clear();
 		record_vector_values = true;
+		TreeMaker tm = lexer.getTreeMaker();
+		
 		List<String> sampling_limit_vectors = new ArrayList<String>();
 		for (ElementaryDesign ed : protocol.elementary_designs) {
-			
 			if (ed == null) continue;
 			List<SingleDesignSpace> spaces = map.get(ed);
 			if (spaces == null) throw new NullPointerException("The design spaces associated with a protocol are NULL (protocol_oid='" + protocol.block + "')");
@@ -2031,7 +2032,10 @@ public class Parser extends BaseParser {
 			if (sampling_limits == null) 
 				throw new IllegalStateException("Unable to determine the sampling limits for observation window (oid='" + ed.observation_oid + "')");
 			
-			sampling_limit_vectors.add(parse(ctx, lexer.getStatement(sampling_limits.getNumberTimes())).trim());
+			BinaryTree bt = tm.newInstance(sampling_limits.getNumberTimes());
+			lexer.addStatement(sampling_limits.getNumberTimes(), bt);
+			lexer.updateNestedTrees();
+			sampling_limit_vectors.add(parse(ctx, bt).trim());
 		}
 		record_vector_values = false;
 		

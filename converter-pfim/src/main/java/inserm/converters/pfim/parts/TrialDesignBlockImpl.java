@@ -576,7 +576,6 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 		return standard_map;
 	}
 	
-	// TODO: This methods needs more work but will do for now.
 	private Map<String, List<String>> createWindowContainmentMap() {
 		Map<String, List<String>> map = new HashMap<String, List<String>>();
 		Observations observations = td.getObservations();
@@ -589,15 +588,15 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 				String oid = oc.getOid(); 
 				if (oid == null) throw new NullPointerException("An observation combination identifier is NULL");
 				List<String> windows = new ArrayList<String>();
-				
 				for (SingleObservation so : oc.getListOfObservations()) {
 					if (so == null) continue;
 					if (so.getListOfObservationRef() == null) continue;
 					for (OidRef ref : so.getListOfObservationRef()) {
 						if (ref == null) continue;
 						String inner_oid = ref.getOidRef();
+						
 						if (inner_oid == null) continue;
-						if (!windows.contains(inner_oid)) windows.contains(inner_oid);
+						if (!windows.contains(inner_oid)) windows.add(inner_oid);
 					}
 				}
 
@@ -959,7 +958,6 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 		List<OidRef> refs = space.getListOfObservationRef();
 		if (refs == null) throw new IllegalStateException("A design space does not reference an observation window.");
 		if (refs.isEmpty()) throw new IllegalStateException("A design space does not reference an observation window.");
-		else if (refs.size() != 1) throw new IllegalStateException("A design space for PFIM can only refer to a single observation window.");
 		
 		OidRef ref = refs.get(0);
 		if (ref == null) throw new NullPointerException("A design space observation reference is NULL");
