@@ -48,7 +48,11 @@ import static crx.converter.engine.scriptlets.BaseScriptlet.tmin;
 import static crx.converter.engine.scriptlets.BaseScriptlet.tspan;
 import static inserm.converters.pfim.OptimisationAlgorithm.FEDOROV_WYNN;
 import static inserm.converters.pfim.OptimisationAlgorithm.SIMPLEX;
-import static inserm.converters.pfim.SettingLabel.*;
+import static inserm.converters.pfim.SettingLabel.GRAPH_LOGICAL;
+import static inserm.converters.pfim.SettingLabel.GRAPH_SUPA;
+import static inserm.converters.pfim.SettingLabel.OUTPUT;
+import static inserm.converters.pfim.SettingLabel.OUTPUT_FIM;
+import static inserm.converters.pfim.SettingLabel.PROJECT;
 import inserm.converters.pfim.parts.OptimalDesignStepImpl;
 import inserm.converters.pfim.parts.ParameterBlockImpl;
 import inserm.converters.pfim.parts.TrialDesignBlockImpl;
@@ -561,6 +565,11 @@ public class Parser extends BaseParser {
 	private String getBatchFilepath() {
 		String cwd = lexer.getOutputDirectory();
 		return cwd + PREFERRED_SEPERATOR + "run.bat";
+	} 
+	
+	private String getBatchFilepathForUnix() {
+		String cwd = lexer.getOutputDirectory();
+		return cwd + PREFERRED_SEPERATOR + "run.sh";
 	} 
 	
 	private String getModelFilename() {
@@ -1081,8 +1090,21 @@ public class Parser extends BaseParser {
 	 * @throws IOException
 	 */
 	public void writeBatchFile() throws IOException {
-		String outFilepath = getBatchFilepath();
+		writeBatchFileWindows();
+		writeBatchFileUnix();
+	}
+	
+	private void writeBatchFileUnix() throws IOException {
+		String outFilepath = getBatchFilepathForUnix();
 		
+		PrintWriter fout = new PrintWriter(outFilepath);
+		fout.write("rscript --vanilla call_run.r\n");
+		fout.close();
+	}
+	
+	private void writeBatchFileWindows() throws IOException {
+		String outFilepath = getBatchFilepath();
+		 
 		PrintWriter fout = new PrintWriter(outFilepath);
 		fout.write("@echo off\r\n");
 		fout.write("rscript --vanilla call_run.r\r\n");
