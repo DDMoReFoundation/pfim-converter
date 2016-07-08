@@ -1,7 +1,5 @@
-#PFIM 4.0 
-#April 2014
-#Copyright (C) PFIM 4.0 - Universite Paris Diderot and INSERM.
-#------------------------------------------------------------------------------------      
+
+rm(list=ls(all=TRUE))
 
 under.unix<-!(version$os=='Microsoft Windows' ||
 			version$os=='Win32' || version$os=='mingw32')
@@ -10,7 +8,11 @@ library(nlme)
 library(deSolve)
 library(numDeriv)
 options(expressions=10000,max.deparse.lines=10000,max.deparse.length=10000, deparse.max.length=10000)
+if(!under.unix) windows.options(record=TRUE) 
 subjects<-NULL
+
+directory<-"DIRECTORY_REPLACE"
+directory.program<-"DIRECTORY_PROGRAM_REPLACE"
 
 #############################
 

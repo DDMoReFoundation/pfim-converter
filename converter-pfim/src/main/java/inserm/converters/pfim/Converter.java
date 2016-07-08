@@ -408,7 +408,6 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		initLibrary();
 		
 		setUsePiecewiseAsEvents(true);
-		sort_structural_model = true;
 		tm = new TreeMaker_();
 		name = NAME;
 		
@@ -1973,7 +1972,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 			}
 		}
 		List<PharmMLElement> elements_under_consideration = createElementsUnderConsideration(refs);
-
+		
 		if (elements_under_consideration.isEmpty()) return;
 		updateDependencyContext(elements_under_consideration, refs);
 

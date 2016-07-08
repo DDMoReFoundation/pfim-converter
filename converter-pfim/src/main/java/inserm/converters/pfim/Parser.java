@@ -48,10 +48,7 @@ import static crx.converter.engine.scriptlets.BaseScriptlet.tmin;
 import static crx.converter.engine.scriptlets.BaseScriptlet.tspan;
 import static inserm.converters.pfim.OptimisationAlgorithm.FEDOROV_WYNN;
 import static inserm.converters.pfim.OptimisationAlgorithm.SIMPLEX;
-import static inserm.converters.pfim.SettingLabel.GRAPH_SUPA;
-import static inserm.converters.pfim.SettingLabel.OUTPUT;
-import static inserm.converters.pfim.SettingLabel.OUTPUT_FIM;
-import static inserm.converters.pfim.SettingLabel.PROJECT;
+import static inserm.converters.pfim.SettingLabel.*;
 import inserm.converters.pfim.parts.OptimalDesignStepImpl;
 import inserm.converters.pfim.parts.ParameterBlockImpl;
 import inserm.converters.pfim.parts.TrialDesignBlockImpl;
@@ -174,18 +171,18 @@ public class Parser extends BaseParser {
 	private Map<ArmDefinition, String> dosing_vector_map = new HashMap<ArmDefinition, String>();
 	private FIMtype fim_type = FIMtype.P;
 	private double givenPower = 0.9;
-	private boolean graphLogical = false;
-	
+	private boolean graphLogical = true;
 	private boolean graphOnly = false;
 	private Host host = null;
 	private boolean identicalTimes = true;
 	private String leftArrayBracket = null;
-	
 	private int maximumIterations = 5000;
+	
 	/**
 	 * Parser Name
 	 */
 	protected String name = "default";
+	
 	private OutputFIMFormat option = OutputFIMFormat.BLOCK_DIAGONAL_FIM;
 	private boolean optProportionsOfsubjects = false;
 	private String output_state_vector_symbol = "yd";
@@ -207,9 +204,7 @@ public class Parser extends BaseParser {
 	private int simplexParameter = 20;
 	private SettingReader sr = null;
 	private String state_vector_symbol = null;
-	
-	private String stdoutFilename = pfimStdoutFilename;
-		
+	private String stdoutFilename = pfimStdoutFilename;	
 	private RandomEffectModelOption trand = RandomEffectModelOption.EXPONENTIAL;
 	
 	/**
@@ -1503,6 +1498,10 @@ public class Parser extends BaseParser {
 	}
 	
 	private void writeGraphLogical(PrintWriter fout) {
+		if (sr != null) {
+			if (sr.hasValue(GRAPH_LOGICAL)) graphLogical = Boolean.parseBoolean(sr.getValue(GRAPH_LOGICAL)); 
+		}
+		
 		if (fout == null) return;
 		TreeMaker tm = lexer.getTreeMaker();
 		String value = parse(ctx, tm.newInstance(graphLogical)).trim();
