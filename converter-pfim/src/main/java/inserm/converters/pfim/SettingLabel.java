@@ -20,6 +20,7 @@ package inserm.converters.pfim;
  * Setting Labels for generic PFIM options.
  */
 public enum SettingLabel {
+	ALGORITHM("algorithm"),
 	GRAPH_LOGICAL("graphLogical"),
 	GRAPH_SUPA("graphSupA"),
 	OUTPUT("output"),

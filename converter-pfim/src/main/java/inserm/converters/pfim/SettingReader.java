@@ -16,9 +16,6 @@
 
 package inserm.converters.pfim;
 
-import static crx.converter.engine.PharmMLTypeChecker.isOptimalDesignStep;
-import static crx.converter.engine.Utils.getClassName;
-
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,21 +24,18 @@ import crx.converter.spi.ILexer;
 import crx.converter.spi.IParser;
 import crx.converter.spi.ISettingReader;
 import crx.converter.tree.TreeMaker;
-import eu.ddmore.libpharmml.dom.commontypes.PharmMLRootType;
 import eu.ddmore.libpharmml.dom.modellingsteps.OperationProperty;
-import eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignOperation;
-import eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignStep;
 
 /**
  * PFIM Settings Reader
  */
 public class SettingReader implements ISettingReader {
-	private ILexer c = null;
 	private Object ctx = new Object();
+	private ILexer c = null;
 	private IParser p = null;
 	private Map<String, OperationProperty> prop_map = new HashMap<String, OperationProperty>();
 	private boolean read_settings = false;
-	private OptimalDesignStep step = null; 
+	List<OperationProperty> props = null; 
 	
 	private void addProperty(String name, OperationProperty prop) {
 		if (name == null || prop == null) return;
@@ -92,27 +86,19 @@ public class SettingReader implements ISettingReader {
 	@Override
 	public void readSettings() {
 		if (c == null) return;
-		if (step == null) return;
-		
-		List<OptimalDesignOperation> operations = step.getListOfOperation();
-		if (operations == null) return;
-		if (operations.isEmpty()) return;
+		if (props == null) return;	
+		if (props.isEmpty()) return;
 		
 		TreeMaker tm = c.getTreeMaker();
-		for (OptimalDesignOperation operation : operations) {
-			if (operation == null) continue;
-			List<OperationProperty> props = operation.getListOfProperty();
-			if (props == null) continue;
-			for (OperationProperty prop : props) {
-				if (prop == null) continue;
-				String name = prop.getName();
-				if (name == null) continue;
-				if (name.isEmpty()) continue;
+		for (OperationProperty prop : props) {
+			if (prop == null) continue;
+			String name = prop.getName();
+			if (name == null) continue;
+			if (name.isEmpty()) continue;
 				
-				c.addStatement(prop, tm.newInstance(prop));
-				c.updateNestedTrees();
-				addProperty(name, prop);
-			}
+			c.addStatement(prop, tm.newInstance(prop));
+			c.updateNestedTrees();
+			addProperty(name, prop);
 		}
 		
 		read_settings = true;
@@ -124,11 +110,7 @@ public class SettingReader implements ISettingReader {
 	@Override
 	public void setParser(IParser p) { this.p = p; }
 
+	
 	@Override
-	public void setStep(PharmMLRootType step) {
-		if (!isOptimalDesignStep(step))
-			throw new IllegalArgumentException("Step is not the expected optimal design step (step='" + getClassName(step) + "')"  );
-		
-		this.step = (OptimalDesignStep) step;
-	}
+	public void setProperties(List<OperationProperty> props) { this.props = props; }
 }

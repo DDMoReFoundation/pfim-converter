@@ -272,16 +272,6 @@ public class Parser extends BaseParser {
 		return s.toString();
 	}
 	
-	void createSettingReader() {
-		Converter c = (Converter) lexer;
-		
-		sr = new SettingReader();
-		sr.setLexer(c);
-		sr.setParser(c.getParser());
-		sr.setStep(c.getOptimalDesignStep().getStep());
-		sr.readSettings();
-	}
-	
 	private String doArrayAccess(String variableName, Integer idx) {
 		String format = "%s%s%s%s";
 		
@@ -378,14 +368,14 @@ public class Parser extends BaseParser {
 		return doArrayAccess(param_model_symbol, pb.getParameterIndex(ipa.parameter.getSymbId()));
 	}
 	
-	
-	
 	/**
 	 * Convert a PharmNL integer
 	 * @param i Integer
 	 * @return String
 	 */
 	protected String doInt(IntValue i) { return i.getValue().toString(); }
+	
+	
 	
 	/**
 	 * Convert a Java boolean to R,
@@ -565,7 +555,7 @@ public class Parser extends BaseParser {
 	private String getBatchFilepath() {
 		String cwd = lexer.getOutputDirectory();
 		return cwd + PREFERRED_SEPERATOR + "run.bat";
-	} 
+	}
 	
 	private String getBatchFilepathForUnix() {
 		String cwd = lexer.getOutputDirectory();
@@ -579,7 +569,7 @@ public class Parser extends BaseParser {
 	@Override
 	public String getModelFunctionFilename(String output_dir, StructuralBlock sb) {
 		return String.format("%s%s%s.%s", output_dir, File.separator, MODEL_FILESTEM, script_file_suffix);
-	}
+	} 
 	
 	private String getParameterValueFromEstimate(SymbolRef ref) {
 		String slope = "0.0";
@@ -679,7 +669,7 @@ public class Parser extends BaseParser {
 		lexer.setSaveRenamedSymbolList(true);
 		setRunId("call_run");
 	}
-
+	
 	private boolean is_parameter_scope(ParameterRandomVariable eta) {
 		if (eta == null) return false;
 		
@@ -691,7 +681,7 @@ public class Parser extends BaseParser {
 		
 		return false;
 	}
-	
+
 	private boolean isPiecewiseFunctionArgument(FunctionArgument arg) {
 		if (arg == null) return false;
 		if (arg.getAssign() != null) {
@@ -888,6 +878,12 @@ public class Parser extends BaseParser {
 			}
 		}
 	}
+	
+	/**
+	 * Register a settings reader with th PFIM parser.
+	 * @param sr_ Settings Reader
+	 */
+	public void register(SettingReader sr_) {  sr = sr_; }
 	
 	
 	@Override

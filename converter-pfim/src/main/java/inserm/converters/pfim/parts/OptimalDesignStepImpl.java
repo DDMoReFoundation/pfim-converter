@@ -20,7 +20,10 @@ import static crx.converter.engine.PharmMLTypeChecker.isIndividualParameter;
 import static crx.converter.engine.PharmMLTypeChecker.isPopulationParameter;
 import static eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignOpType.EVALUATION;
 import static eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignOpType.OPTIMISATION;
+import static inserm.converters.pfim.SettingLabel.ALGORITHM;
 import inserm.converters.pfim.OptimisationAlgorithm;
+import inserm.converters.pfim.Parser;
+import inserm.converters.pfim.SettingReader;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -42,6 +45,7 @@ import eu.ddmore.libpharmml.dom.modeldefn.IndividualParameter;
 import eu.ddmore.libpharmml.dom.modeldefn.PopulationParameter;
 import eu.ddmore.libpharmml.dom.modellingsteps.Algorithm;
 import eu.ddmore.libpharmml.dom.modellingsteps.InitialEstimate;
+import eu.ddmore.libpharmml.dom.modellingsteps.OperationProperty;
 import eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignOpType;
 import eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignOperation;
 import eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignStep;
@@ -70,6 +74,7 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 	private OptimalDesignOperation [] operations = null;
 	private boolean optimisation = false;
 	private List<ParameterEstimate> params_to_estimate = new ArrayList<ParameterEstimate>();
+	private SettingReader sr = null;
 	private OptimalDesignStep step = null;
 	
 	/**
@@ -321,12 +326,27 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 	 */
 	public boolean isOptimisation() { return optimisation; }
 	
+	// Read the algorithm and other linked optimal design settings linked to PFIM.
 	private void readAlogrithm(OptimalDesignOperation op) {
 		if (op == null) return;
+		
 		Algorithm algo = op.getAlgorithm();
 		if (algo == null) return;
-
-		String definition = algo.getDefinition();
+		List<OperationProperty> properties =  algo.getProperty();
+		if (properties == null) return;
+		if (properties.isEmpty()) return;
+		
+		sr = new SettingReader();
+		sr.setLexer(lexer);
+		sr.setParser(lexer.getParser());
+		sr.setProperties(properties);
+		sr.readSettings();
+		
+		Parser p = (Parser) lexer.getParser();
+		p.register(sr);
+		
+		if(!sr.hasValue(ALGORITHM.toString())) return;
+		String definition = sr.getValue(ALGORITHM.toString());
 		if (definition == null) throw new NullPointerException("OD algorithm definition not specified.");
 		if (definition.isEmpty()) throw new NullPointerException("OD algorithm definition is a zero-length string.");
 		
