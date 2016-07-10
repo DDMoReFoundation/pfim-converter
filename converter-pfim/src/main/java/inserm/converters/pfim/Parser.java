@@ -30,7 +30,6 @@ import static crx.converter.engine.PharmMLTypeChecker.isLogicalBinaryOperation;
 import static crx.converter.engine.PharmMLTypeChecker.isLogicalUnaryOperation;
 import static crx.converter.engine.PharmMLTypeChecker.isPiecewise;
 import static crx.converter.engine.PharmMLTypeChecker.isPopulationParameter;
-import static crx.converter.engine.PharmMLTypeChecker.isRandomVariable;
 import static crx.converter.engine.PharmMLTypeChecker.isReal;
 import static crx.converter.engine.PharmMLTypeChecker.isRhs;
 import static crx.converter.engine.PharmMLTypeChecker.isSequence;
@@ -46,6 +45,8 @@ import static crx.converter.engine.scriptlets.BaseScriptlet.function_call_format
 import static crx.converter.engine.scriptlets.BaseScriptlet.tmax;
 import static crx.converter.engine.scriptlets.BaseScriptlet.tmin;
 import static crx.converter.engine.scriptlets.BaseScriptlet.tspan;
+import static eu.ddmore.libpharmml.dom.probonto.ParameterName.STDEV;
+import static eu.ddmore.libpharmml.dom.probonto.ParameterName.VAR;
 import static inserm.converters.pfim.OptimisationAlgorithm.FEDOROV_WYNN;
 import static inserm.converters.pfim.OptimisationAlgorithm.SIMPLEX;
 import static inserm.converters.pfim.SettingLabel.GRAPH_LOGICAL;
@@ -95,7 +96,6 @@ import crx.converter.spi.blocks.ObservationBlock;
 import crx.converter.spi.blocks.ParameterBlock;
 import crx.converter.spi.blocks.StructuralBlock;
 import crx.converter.spi.blocks.TrialDesignBlock2;
-import crx.converter.spi.blocks.VariabilityBlock;
 import crx.converter.spi.steps.OptimalDesignStep_;
 import crx.converter.tree.BinaryTree;
 import crx.converter.tree.Node;
@@ -106,7 +106,6 @@ import eu.ddmore.libpharmml.dom.commontypes.BooleanValue;
 import eu.ddmore.libpharmml.dom.commontypes.DerivativeVariable;
 import eu.ddmore.libpharmml.dom.commontypes.InitialCondition;
 import eu.ddmore.libpharmml.dom.commontypes.IntValue;
-import eu.ddmore.libpharmml.dom.commontypes.LevelReference;
 import eu.ddmore.libpharmml.dom.commontypes.PharmMLRootType;
 import eu.ddmore.libpharmml.dom.commontypes.RealValue;
 import eu.ddmore.libpharmml.dom.commontypes.Rhs;
@@ -131,7 +130,6 @@ import eu.ddmore.libpharmml.dom.maths.Piecewise;
 import eu.ddmore.libpharmml.dom.modeldefn.Distribution;
 import eu.ddmore.libpharmml.dom.modeldefn.IndividualParameter;
 import eu.ddmore.libpharmml.dom.modeldefn.ObservationError;
-import eu.ddmore.libpharmml.dom.modeldefn.ParameterRandomEffect;
 import eu.ddmore.libpharmml.dom.modeldefn.ParameterRandomVariable;
 import eu.ddmore.libpharmml.dom.modeldefn.PopulationParameter;
 import eu.ddmore.libpharmml.dom.modeldefn.StructuredModel;
@@ -474,7 +472,6 @@ public class Parser extends BaseParser {
 	private String doSymbolRef(SymbolRef s) {
 		String symbol = s.getSymbIdRef();
 		
-		Accessor a = lexer.getAccessor();
 		PharmMLRootType element = a.fetchElement(s);
 		
 		if (lexer.isStateVariable(symbol) || isDerivative(element)) 
@@ -575,7 +572,6 @@ public class Parser extends BaseParser {
 		String slope = "0.0";
 		if (ref == null) return slope;
 		
-		Accessor a = lexer.getAccessor();
 		OptimalDesignLexer c = (OptimalDesignLexer) lexer;
 		OptimalDesignStepImpl step = (OptimalDesignStepImpl) c.getOptimalDesignStep();
 		
@@ -670,18 +666,6 @@ public class Parser extends BaseParser {
 		setRunId("call_run");
 	}
 	
-	private boolean is_parameter_scope(ParameterRandomVariable eta) {
-		if (eta == null) return false;
-		
-		LevelReference lref = eta.getListOfVariabilityReference().get(0);
-		if (lref != null) {
-			VariabilityBlock vb = lexer.getVariabilityBlock(lref.getSymbRef());
-			if (vb != null) return vb.isParameterVariability();
-		}
-		
-		return false;
-	}
-
 	private boolean isPiecewiseFunctionArgument(FunctionArgument arg) {
 		if (arg == null) return false;
 		if (arg.getAssign() != null) {
@@ -819,20 +803,9 @@ public class Parser extends BaseParser {
 	}
 	
 	// Assuming a single random effect per IP instance.
-	private String readOmega(ParameterRandomEffect rve) {
+	private String readWidth(ParameterRandomVariable rv) {
 		String omega = "0.0";
-		if (rve == null) return omega;
-		
-		Accessor a = lexer.getAccessor();
-		SymbolRef ref = rve.getSymbRef().get(0);
-		if (ref == null) return omega;
-		
-		
-		PharmMLRootType element = a.fetchElement(ref);
-		if (!isRandomVariable(element)) return omega;
-		ParameterRandomVariable rv = (ParameterRandomVariable) element;
-		if (!is_parameter_scope(rv)) 
-			throw new IllegalStateException("Random variable does not have the required parameter variability scope (name='" + rv.getSymbId() + "')");
+		if (rv == null) return omega;
 		
 		// Just assuming probonto and normal usage, nothing else.
 		Distribution dist = rv.getDistribution();
@@ -841,24 +814,40 @@ public class Parser extends BaseParser {
 		ProbOnto probonto = dist.getProbOnto();
 		if (probonto == null) return omega;
 		
+		OptimalDesignLexer c = (OptimalDesignLexer) lexer;
+		OptimalDesignStep_ step = c.getOptimalDesignStep();
+		
 		for (DistributionParameter dp : probonto.getListOfParameter()) {
 			if (dp == null) continue;
 			ParameterName name = dp.getName();
 			if (name == null) continue;
-			if (ParameterName.STDEV.equals(name)) {
+			if (STDEV.equals(name)) {
 				Object content = dp.getAssign().getContent();
 				if (!isSymbolReference(content)) return omega;
+				SymbolRef ref = (SymbolRef) content;
 				
-				ref = (SymbolRef) content;
-				element = a.fetchElement(ref);
+				PharmMLRootType element = a.fetchElement(ref);
 				if (!isPopulationParameter(element)) return omega;
 				PopulationParameter p = (PopulationParameter) element;
 				
-				OptimalDesignLexer c = (OptimalDesignLexer) lexer;
-				OptimalDesignStepImpl step = (OptimalDesignStepImpl) c.getOptimalDesignStep();
 				ParameterEstimate pe = step.getParameterEstimate(p);
 				if (pe == null) throw new NullPointerException("The expected parameter estimate is NULL");
-				omega = parse(ctx, lexer.getStatement(pe.getInitialEstimate())).trim();
+				omega = parse(ctx, tm.newInstance(pe.getInitialEstimate())).trim();
+			} else if (VAR.equals(name)) {
+				Object content = dp.getAssign().getContent();
+				if (!isSymbolReference(content)) return omega;
+				SymbolRef ref = (SymbolRef) content;
+				
+				PharmMLRootType element = a.fetchElement(ref);
+				if (!isPopulationParameter(element)) return omega;
+				PopulationParameter p = (PopulationParameter) element;
+				
+				ParameterEstimate pe = step.getParameterEstimate(p);
+				if (pe == null) throw new NullPointerException("The expected parameter estimate is NULL");
+				omega = parse(ctx, tm.newInstance(pe.getInitialEstimate())).trim();
+				double variance = Double.parseDouble(parse(ctx, tm.newInstance(pe.getInitialEstimate())).trim());
+				Double omega_ = Math.sqrt(variance);
+				omega = omega_.toString();
 			}
 		}
 		
@@ -1110,7 +1099,6 @@ public class Parser extends BaseParser {
 	private void writeBeta(PrintWriter fout) {
 		if (fout == null) return;
 		
-		Accessor a = lexer.getAccessor();
 		ParameterBlock pb = lexer.getParameterBlock();
 		OptimalDesignLexer c = (OptimalDesignLexer) lexer;
 		OptimalDesignStepImpl step = (OptimalDesignStepImpl) c.getOptimalDesignStep();
@@ -1479,19 +1467,31 @@ public class Parser extends BaseParser {
 		fout.write(String.format(format, letter));
 	}
 
-	private void writeGamma(PrintWriter fout) {
+	private void writeGammas(PrintWriter fout) {
 		if (fout == null) return;
 		
 		ParameterBlock pb = lexer.getParameterBlock();
-		TrialDesignBlock2 tdb = (TrialDesignBlock2) lexer.getTrialDesign();
+		OptimalDesignLexer c = (OptimalDesignLexer) lexer;
+		OptimalDesignStepImpl step = (OptimalDesignStepImpl) c.getOptimalDesignStep();
+		if (step == null) throw new NullPointerException("OD step is NULL");
 		
-		if (!tdb.hasOccassions()) {
-			List<String> values = new ArrayList<String>();
-			for (int i = 0; i < pb.getIndividualParameters().size(); i++) values.add("0.0");
-				
-			String format = "gamma<-diag(%s)\n";
-			fout.write(String.format(format, cat(values)));
+		List<String> gamma_values = new ArrayList<String>();
+		for (IndividualParameter ip : pb.getIndividualParameters()) {
+			String gamma = "0.0";
+			if (!step.isFixed(ip)) {
+				List<ParameterRandomVariable> gammas = step.getGammas(ip);
+				if (gammas != null) {
+					if (gammas.size() > 1) throw new IllegalStateException("PFIM only allows a single omega to be bound to an Individual parameter");
+					if (gammas.isEmpty()) continue;
+					gamma = readWidth(gammas.get(0));
+				}
+			}
+			
+			gamma_values.add(gamma);
 		}
+		
+		String format = "gamma<-diag(%s)\n";
+		fout.write(String.format(format, cat(gamma_values)));
 	}
 	
 	private void writeGivenPower(PrintWriter fout) {
@@ -1784,7 +1784,7 @@ public class Parser extends BaseParser {
 		}
 	}
 	
-	private void writeOmega(PrintWriter fout) {
+	private void writeOmegas(PrintWriter fout) {
 		if (fout == null) return;
 		
 		ParameterBlock pb = lexer.getParameterBlock();
@@ -1792,21 +1792,23 @@ public class Parser extends BaseParser {
 		OptimalDesignStepImpl step = (OptimalDesignStepImpl) c.getOptimalDesignStep();
 		if (step == null) throw new NullPointerException("OD step is NULL");
 		
-		List<String> omegas = new ArrayList<String>();
+		List<String> omega_values = new ArrayList<String>();
 		for (IndividualParameter ip : pb.getIndividualParameters()) {
 			String omega = "0.0";
 			
-			
 			if (!step.isFixed(ip)) {
-				ParameterRandomEffect rv = ip.getStructuredModel().getListOfRandomEffects().get(0);
-				omega = readOmega(rv);
+				List<ParameterRandomVariable> omegas = step.getOmegas(ip);
+				if (omegas != null) {
+					if (omegas.size() > 1) throw new IllegalStateException("PFIM only allows a single omega to be bound to an Individual parameter");
+					if (omegas.isEmpty()) continue;
+					omega = readWidth(omegas.get(0));
+				}
 			}
-			
-			omegas.add(omega);
+			omega_values.add(omega);
 		}
 		
 		String format = "omega<-diag(%s)\n";
-		fout.write(String.format(format, cat(omegas)));
+		fout.write(String.format(format, cat(omega_values)));
 	}
 	
 	private void writeOptimisationOptions(PrintWriter fout) {
@@ -1954,7 +1956,7 @@ public class Parser extends BaseParser {
 		if (protocols.isEmpty()) throw new IllegalStateException("Trial design defines no sampling protocols");
 		
 		String catted_arr = "v";
-		String protocolFormat = "prot%s<-list(%s) %s Observation Block=%s\n";
+		String protocolFormat = "prot%s<-list(%s)\n";
 		initHost();
 		for (Protocol protocol : protocols) {
 			if (protocol == null) continue;
@@ -1997,7 +1999,7 @@ public class Parser extends BaseParser {
 				recorded_vector_values.add(max);
 			}
 			
-			fout.write(String.format(protocolFormat, protocol.getLabel(), cat_(sampling_stmts), comment_char, protocol.block));
+			fout.write(String.format(protocolFormat, protocol.getLabel(), cat_(sampling_stmts)));
 		}
 	}
 	
@@ -2244,12 +2246,18 @@ public class Parser extends BaseParser {
 		fout.write(String.format(format, "Hmax", "Inf"));
 	}
 	
+	private Accessor a = null;
+	private TreeMaker tm = null;
+	
 	/**
 	 * Write a PFIM STDIN file.
 	 * @throws IOException
 	 */
 	public void writeSTDIN() throws IOException {
 		String outFilepath = getStdinFilepath();
+		
+		a = lexer.getAccessor();
+		tm = lexer.getTreeMaker();
 		
 		PrintWriter fout = new PrintWriter(outFilepath);
 		writeScriptHeader(fout, lexer.getModelFilename());
@@ -2277,8 +2285,8 @@ public class Parser extends BaseParser {
 		writeBetaFixed(fout);
 		writeNumberOfOccassions(fout);
 		writeTrand(fout);
-		writeOmega(fout);
-		writeGamma(fout);
+		writeOmegas(fout);
+		writeGammas(fout);
 		writeErrorModelDerivedSettings(fout);
 		writeProt(fout);
 		writeSubjects(fout);

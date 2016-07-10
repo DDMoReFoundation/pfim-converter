@@ -18,6 +18,7 @@ package inserm.converters.pfim.parts;
 
 import static crx.converter.engine.PharmMLTypeChecker.isIndividualParameter;
 import static crx.converter.engine.PharmMLTypeChecker.isPopulationParameter;
+import static crx.converter.engine.PharmMLTypeChecker.isRandomVariable;
 import static eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignOpType.EVALUATION;
 import static eu.ddmore.libpharmml.dom.modellingsteps.OptimalDesignOpType.OPTIMISATION;
 import static inserm.converters.pfim.SettingLabel.ALGORITHM;
@@ -36,13 +37,20 @@ import crx.converter.engine.FixedParameter;
 import crx.converter.engine.parts.SortableElement;
 import crx.converter.spi.ILexer;
 import crx.converter.spi.blocks.ParameterBlock;
+import crx.converter.spi.blocks.VariabilityBlock;
 import crx.converter.spi.steps.OptimalDesignStep_;
 import crx.converter.tree.TreeMaker;
+import eu.ddmore.libpharmml.dom.commontypes.LevelReference;
 import eu.ddmore.libpharmml.dom.commontypes.PharmMLRootType;
 import eu.ddmore.libpharmml.dom.commontypes.RealValue;
 import eu.ddmore.libpharmml.dom.commontypes.SymbolRef;
 import eu.ddmore.libpharmml.dom.modeldefn.IndividualParameter;
+import eu.ddmore.libpharmml.dom.modeldefn.ParameterRandomEffect;
+import eu.ddmore.libpharmml.dom.modeldefn.ParameterRandomVariable;
+import eu.ddmore.libpharmml.dom.modeldefn.ParentLevel;
 import eu.ddmore.libpharmml.dom.modeldefn.PopulationParameter;
+import eu.ddmore.libpharmml.dom.modeldefn.StructuredModel;
+import eu.ddmore.libpharmml.dom.modeldefn.VariabilityLevelDefinition;
 import eu.ddmore.libpharmml.dom.modellingsteps.Algorithm;
 import eu.ddmore.libpharmml.dom.modellingsteps.InitialEstimate;
 import eu.ddmore.libpharmml.dom.modellingsteps.OperationProperty;
@@ -70,7 +78,9 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 	private Map<ParameterEstimate, Integer> estimate_to_index = new HashMap<ParameterEstimate, Integer>();
 	private boolean evaluation = false;
 	private List<FixedParameter> fixed_parameters = new ArrayList<FixedParameter>();
+	private Map<IndividualParameter, List<ParameterRandomVariable>> gamma_map = new HashMap<IndividualParameter, List<ParameterRandomVariable>>();
 	private Map<ParameterEstimate, Integer> indiv_estimate_to_index = new HashMap<ParameterEstimate, Integer>();
+	private Map<IndividualParameter, List<ParameterRandomVariable>> omega_map = new HashMap<IndividualParameter, List<ParameterRandomVariable>>();
 	private OptimalDesignOperation [] operations = null;
 	private boolean optimisation = false;
 	private List<ParameterEstimate> params_to_estimate = new ArrayList<ParameterEstimate>();
@@ -89,6 +99,131 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 		step = step_;
 		lexer = lexer_;
 		a = lexer_.getAccessor();
+	}
+	
+	private void buildGammaMap() {
+		ParameterBlock pb = lexer.getParameterBlock();
+		if (pb == null) return;
+		
+		VariabilityBlock vb = getParameterVariabilityScope();
+		if (vb == null) return;
+		List<VariabilityLevelDefinition> levels = vb.getModel().getLevel();
+		if (levels == null) return;
+		if (levels.size() > 2) throw new IllegalStateException("More than the expected variability levels");
+		
+		String id_level = null, occassion_level = null;
+		for (VariabilityLevelDefinition level : levels) {
+			if (level == null) continue;
+			if (level.getParentLevel() == null) {
+				id_level = level.getSymbId();
+				break;
+			}
+		}
+		if (id_level == null) return;
+		for (VariabilityLevelDefinition level : levels) {
+			if (level == null) continue;
+			ParentLevel parent = level.getParentLevel();
+			if (parent != null) {
+				SymbolRef ref = parent.getSymbRef();
+				if (ref != null) {
+					if (id_level.equalsIgnoreCase(ref.getSymbIdRef())) {
+						occassion_level = level.getSymbId();
+						break;
+					}
+				}
+			}
+		}
+		if (occassion_level == null) return;
+		
+		Accessor a = lexer.getAccessor();
+		List<IndividualParameter> ips = pb.getIndividualParameters();
+		for (IndividualParameter ip : ips) {
+			if (ip == null) throw new NullPointerException("An individual parameter is NULL");
+			if (!isFixed(ip)) {
+				List<ParameterRandomVariable> gammas = new ArrayList<ParameterRandomVariable>();
+				StructuredModel soe = ip.getStructuredModel();
+				if (soe == null) continue;
+				List<ParameterRandomEffect> rves = soe.getListOfRandomEffects();
+				if (rves == null) continue;
+				if (rves.size() > 2) throw new IllegalStateException("More than expected random effects in individual variable (symbId='" + ip.getSymbId() + "')");
+				for (ParameterRandomEffect rve : rves) {
+					if (rve == null) continue;
+					if (rve.getSymbRef().isEmpty()) continue;
+					SymbolRef ref = rve.getSymbRef().get(0);
+					if (ref != null) {
+						PharmMLRootType element = a.fetchElement(ref);
+						if (isRandomVariable(element)) {
+							ParameterRandomVariable rv = (ParameterRandomVariable) element;
+							for (LevelReference lref : rv.getListOfVariabilityReference()) {
+								if (lref == null) continue;
+								ref = lref.getSymbRef();
+								if (ref != null) {
+									if (occassion_level.equalsIgnoreCase(ref.getSymbIdRef())) gammas.add(rv);
+								}
+							}
+						}
+					}
+				}
+				
+				if (gammas.size() > 0) gamma_map.put(ip, gammas);
+			}
+		}
+	}
+	
+	// PFIM only support 1 omega per individual variable.
+	private void buildOmegaMap() {
+		ParameterBlock pb = lexer.getParameterBlock();
+		if (pb == null) return;
+		
+		VariabilityBlock vb = getParameterVariabilityScope();
+		if (vb == null) return;
+		List<VariabilityLevelDefinition> levels = vb.getModel().getLevel();
+		if (levels == null) return;
+		if (levels.size() > 2) throw new IllegalStateException("More than the expected variability levels");
+		
+		String id_level = null;
+		for (VariabilityLevelDefinition level : levels) {
+			if (level == null) continue;
+			if (level.getParentLevel() == null) {
+				id_level = level.getSymbId();
+				break;
+			}
+		}
+		if (id_level == null) return;
+		
+		Accessor a = lexer.getAccessor();
+		List<IndividualParameter> ips = pb.getIndividualParameters();
+		for (IndividualParameter ip : ips) {
+			if (ip == null) throw new NullPointerException("An individual parameter is NULL");
+			if (!isFixed(ip)) {
+				List<ParameterRandomVariable> omegas = new ArrayList<ParameterRandomVariable>();
+				StructuredModel soe = ip.getStructuredModel();
+				if (soe == null) continue;
+				List<ParameterRandomEffect> rves = soe.getListOfRandomEffects();
+				if (rves == null) continue;
+				if (rves.size() > 2) throw new IllegalStateException("More than expected random effects in individual variable (symbId='" + ip.getSymbId() + "')");
+				for (ParameterRandomEffect rve : rves) {
+					if (rve == null) continue;
+					if (rve.getSymbRef().isEmpty()) continue;
+					SymbolRef ref = rve.getSymbRef().get(0);
+					if (ref != null) {
+						PharmMLRootType element = a.fetchElement(ref);
+						if (isRandomVariable(element)) {
+							ParameterRandomVariable rv = (ParameterRandomVariable) element;
+							for (LevelReference lref : rv.getListOfVariabilityReference()) {
+								if (lref == null) continue;
+								ref = lref.getSymbRef();
+								if (ref != null) {
+									if (id_level.equalsIgnoreCase(ref.getSymbIdRef())) omegas.add(rv);
+								}
+							}
+						}
+					}
+				}
+				
+				if (omegas.size() > 0) omega_map.put(ip, omegas);
+			}
+		}
 	}
 	
 	private void buildOperationsArray() {
@@ -135,6 +270,8 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 		buildOperationsArray();
 		setTaskType();
 		buildParameterEstimateTrees();
+		buildOmegaMap();
+		buildGammaMap();
 	}
 	
 	private void categoriseParameterUsage() {
@@ -169,7 +306,7 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 			}
 		}
 	}
-	
+
 	@Override
 	public String getAlgorithm() { return algorithm; }
 
@@ -210,10 +347,28 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 	 * @return java.util.List<FixedParameter>
 	 */
 	public List<FixedParameter> getFixedParameters() { return fixed_parameters; }
+	
+	@Override
+	public List<ParameterRandomVariable> getGammas(IndividualParameter ip) {
+		if (ip != null) {
+			if (gamma_map.containsKey(ip)) return gamma_map.get(ip); 
+		}
+		
+		return null;
+	}
 
 	@Override
 	public String getName() { return step.getOid(); }
-	
+
+	@Override
+	public List<ParameterRandomVariable> getOmegas(IndividualParameter ip) {
+		if (ip != null) {
+			if (omega_map.containsKey(ip)) return omega_map.get(ip); 
+		}
+		
+		return null;
+	}
+
 	/**
 	 * Get the operations array bound to the OD step.
 	 * @return
@@ -264,6 +419,21 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 	 */
 	public List<ParameterEstimate> getParametersToEstimate() { return params_to_estimate; }
 
+	private VariabilityBlock getParameterVariabilityScope() {
+		VariabilityBlock vb = null;
+		
+		List<VariabilityBlock> vbs = lexer.getScriptDefinition().getVariabilityBlocks();
+		for (VariabilityBlock vb_ : vbs) {
+			if (vb_ == null) continue;
+			if (vb_.isParameterVariability()) {
+				vb = vb_;
+				break;
+			}
+		}
+		
+		return vb;
+	}
+
 	/**
 	 * Get the source PharmML step for the optimal design.
 	 * @return OptimalDesignStep
@@ -281,16 +451,16 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 	 * @return boolean
 	 */
 	public boolean hasFixedParameters() { return fixed_parameters.size() > 0; }
-
+	
 	/**
 	 * If the estimation has parameters to estimate.
 	 * @return boolean
 	 */
 	public boolean hasParametersToEstimate() { return params_to_estimate.size() > 0; }
-
+	
 	@Override
 	public boolean hasSymbolId(String name) { return false; }
-
+	
 	/**
 	 * Flag if the parameter estimation is constrained.
 	 * @return boolean
@@ -303,7 +473,7 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 		
 		return false;
 	}
-
+	
 	/**
 	 * Flag if an evaluation task.
 	 * @return boolean
@@ -319,13 +489,13 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 		
 		return false;
 	}
-	
+
 	/**
 	 * Flag if an optimisation task.
 	 * @return boolean
 	 */
 	public boolean isOptimisation() { return optimisation; }
-	
+
 	// Read the algorithm and other linked optimal design settings linked to PFIM.
 	private void readAlogrithm(OptimalDesignOperation op) {
 		if (op == null) return;
@@ -356,7 +526,7 @@ public class OptimalDesignStepImpl extends BaseStepImpl implements OptimalDesign
 		else
 			algorithm = definition;
 	}
-	
+
 	private void setTaskType() {
 		if (operations == null) return;
 		
