@@ -17,6 +17,7 @@
 package inserm.converters.pfim.parts;
 
 import static crx.converter.engine.PharmMLTypeChecker.isCorrelation;
+import static crx.converter.engine.PharmMLTypeChecker.isCovariate;
 import static crx.converter.engine.PharmMLTypeChecker.isIndividualParameter;
 import static crx.converter.engine.PharmMLTypeChecker.isParameter;
 import static crx.converter.engine.PharmMLTypeChecker.isPopulationParameter;
@@ -36,6 +37,7 @@ import crx.converter.engine.common.CorrelationRef;
 import crx.converter.engine.common.IndividualParameterAssignment;
 import crx.converter.engine.common.ParameterEvent;
 import crx.converter.spi.ILexer;
+import crx.converter.spi.blocks.CovariateBlock;
 import crx.converter.spi.blocks.OrderableBlock;
 import crx.converter.spi.blocks.ParameterBlock;
 import crx.converter.tree.BinaryTree;
@@ -46,11 +48,18 @@ import eu.ddmore.libpharmml.dom.commontypes.Rhs;
 import eu.ddmore.libpharmml.dom.commontypes.SymbolRef;
 import eu.ddmore.libpharmml.dom.modeldefn.CommonParameter;
 import eu.ddmore.libpharmml.dom.modeldefn.Correlation;
+import eu.ddmore.libpharmml.dom.modeldefn.CovariateDefinition;
+import eu.ddmore.libpharmml.dom.modeldefn.CovariateRelation;
+import eu.ddmore.libpharmml.dom.modeldefn.FixedEffectRelation;
 import eu.ddmore.libpharmml.dom.modeldefn.IndividualParameter;
+import eu.ddmore.libpharmml.dom.modeldefn.LRHSTransformationType;
 import eu.ddmore.libpharmml.dom.modeldefn.Parameter;
 import eu.ddmore.libpharmml.dom.modeldefn.ParameterModel;
 import eu.ddmore.libpharmml.dom.modeldefn.ParameterRandomVariable;
 import eu.ddmore.libpharmml.dom.modeldefn.PopulationParameter;
+import eu.ddmore.libpharmml.dom.modeldefn.StructuredModel;
+import eu.ddmore.libpharmml.dom.modeldefn.StructuredModel.LinearCovariate;
+import eu.ddmore.libpharmml.dom.modeldefn.TransformationType;
 import eu.ddmore.libpharmml.dom.modellingsteps.FIMtype;
 
 /**
@@ -59,9 +68,10 @@ import eu.ddmore.libpharmml.dom.modellingsteps.FIMtype;
 public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements OrderableBlock, ParameterBlock {	
 	private List<PharmMLRootType> cached_declaration_list = new ArrayList<PharmMLRootType>();
 	private List<ParameterEvent> events = new ArrayList<ParameterEvent>();
+	private Map<CovariateDefinition, FixedEffectRef> fixed_effect_map = new HashMap<CovariateDefinition, FixedEffectRef>();
 	private List<IndividualParameterAssignment> ipas = new ArrayList<IndividualParameterAssignment>();
-	private List<PharmMLElement> objects_to_remove = new ArrayList<PharmMLElement>();
-	private Map<CommonParameter, Integer> param_map_idx = new HashMap<CommonParameter, Integer>(); 
+	private List<PharmMLElement> objects_to_remove = new ArrayList<PharmMLElement>(); 
+	private Map<CommonParameter, Integer> param_map_idx = new HashMap<CommonParameter, Integer>();
 	private Map<String, CommonParameter> param_map_name = new HashMap<String, CommonParameter>();
 	private ArrayList<PopulationParameter> params = new ArrayList<PopulationParameter>();
 	private ParameterModel pm = null;
@@ -116,6 +126,74 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 	
 	@Override
 	public boolean addCluster(Cluster cluster) { throw new UnsupportedOperationException(); }
+	
+	/**
+	 * Build the covariate/fixed effect relationships (if any).
+	 */
+	public void buildFixedEffectRefs() {
+		List<IndividualParameter> ips = indiv_params;
+		if (ips == null) return;
+		if (ips.isEmpty()) return;
+		
+		//Map<CovariateDefinition, FixedEffectRef>
+		Accessor a = lexer.getAccessor();
+		CovariateBlock cb = lexer.getCovariateBlock();
+		if (cb == null) return;
+		List<String> categoricals = cb.getCategoricalCovariateNames();
+		if (categoricals == null) return;
+		if (categoricals.isEmpty()) return;
+		
+		for (IndividualParameter ip : ips) {
+			if (ip == null) continue;
+			StructuredModel sm = ip.getStructuredModel();
+			if (sm == null) continue;
+			
+			TransformationType transformation = TransformationType.IDENTITY;
+			LRHSTransformationType ltrans = sm.getTransformation();
+			if (ltrans != null) if (ltrans.getType() != null) transformation = ltrans.getType(); 
+			
+			LinearCovariate lc = sm.getLinearCovariate();
+			if (lc == null) continue;
+			
+			List<CovariateRelation> covs = lc.getListOfCovariate();
+			if (covs != null) {
+				if (covs.isEmpty()) continue;
+				for (CovariateRelation cr : covs) {
+					if (cr == null) continue;
+					PharmMLRootType element = a.fetchElement(cr);
+					if (isCovariate(element)) {
+						CovariateDefinition cov = (CovariateDefinition) element;
+						String symbId = cov.getSymbId();
+						if (symbId == null) continue;
+						if (categoricals.contains(symbId)) {
+							FixedEffectRef fref = null;
+							if (!fixed_effect_map.containsKey(cov)) {
+								fref = new FixedEffectRef(cov);
+								fixed_effect_map.put(cov, fref);
+							} 
+							else fref = fixed_effect_map.get(cov);
+							
+							fref.transformation = transformation;
+							fref.addIndividualParameter(ip);
+							
+							// Register the fixed effect parameter relations (if any).
+							List<FixedEffectRelation> fixed_effects = cr.getListOfFixedEffect();
+							if (fixed_effects != null) {
+								for (FixedEffectRelation fr : fixed_effects) {
+									if (fr == null) continue;
+									element = a.fetchElement(fr);
+									if (!isPopulationParameter(element))
+										throw new IllegalStateException("A fixed effect is not the expected numeric variable (cov='" + cov.getSymbId() + "')");
+									
+									fref.addBetaCovariate(element);
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 	
 	private void buildIPATrees() {
 		TreeMaker tm = lexer.getTreeMaker();
@@ -238,7 +316,7 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 		p.setAssign(rhs);
 		
 		return p;
-	}
+	} 
 	
 	@Override
 	public List<Cluster> getClusters() { throw new UnsupportedOperationException(); }
@@ -248,7 +326,13 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 	 * @return java.util.List<Event>
 	 * @see ParameterBlockImpl#hasEvents()
 	 */
-	public List<ParameterEvent> getEvents() { return events; } 
+	public List<ParameterEvent> getEvents() { return events; }
+	
+	/**
+	 * Get the PFIM specific fixed effect reference map.
+	 * @return Map<CovariateDefinition, FixedEffectRef>
+	 */
+	public Map<CovariateDefinition, FixedEffectRef> getFixedEffectReferenceMap() { return this.fixed_effect_map; }
 	
 	/**
 	 * Get of individual parameteter assignments.
@@ -281,7 +365,7 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 	public ParameterModel getModel() {
 		return pm;
 	}
-	
+ 	
 	@Override
 	public String getName() {
 		String blkId = "__RUBBISH_DEFAULT_VALUE_";
@@ -290,7 +374,7 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 		}
 		return blkId;
 	}
-	
+
 	/**
 	 * Get the index of a parameter in the numeric parameter array passed to a model function.
 	 * @param name Parameter Name
@@ -307,7 +391,7 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 
 		return idx;
 	}
-	
+
 	/**
 	 * Get the index of a parameter in the numeric parameter array passed to a model function.
 	 * @param ref Reference to the parameter
@@ -327,19 +411,19 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 		
 		return idx;
 	}
- 	
+	
 	/**
 	 * Get a list of numeric parameters.
 	 * @return java.util.List<eu.ddmore.libpharmml.dom.modeldefn.PopulationParameter>
 	 */
 	public List<PopulationParameter> getParameters() { return params; }
-
+	
 	/**
 	 * Get a list of random variables.
 	 * @return java.util.List<eu.ddmore.libpharmml.dom.modeldefn.ParameterRandomVariable>
 	 */
 	public List<ParameterRandomVariable> getRandomVariables(){ return rvs; }
-
+	
 	@Override
 	public List<String> getSymbolIds() {
 		ArrayList<String> ids = new ArrayList<String>();
@@ -370,7 +454,7 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 		if (rhs == null) return false;
 		return rhs.getPiecewise() != null;
 	}
-	
+
 	@Override
 	public boolean hasSymbolId(String name) {
 		boolean has = false;
@@ -387,7 +471,7 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 		}
 		return has;
 	}
-	
+
 	/**
 	 * Flag if a random variable is correlated, i.e. linked.<br/>
 	 * Acts as a filter flag to avoid duplicated random variable assignment blocks.
@@ -416,7 +500,7 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 			return true;
 		}
 	}
-
+	
 	private void recast_parameters(ParameterModel pm_) {
 		if (pm_ == null) return;
 		
@@ -426,7 +510,7 @@ public class ParameterBlockImpl extends BaseRandomVariableBlockImpl implements O
 		for (Object o : elements) if (isParameter(o)) simple_parameters.add((Parameter) o);
 		for (Parameter p : simple_parameters) recast(pm_, p);
 	}
-
+	
 	// Remove so do not show up in the numeric parameter vector but as part of a matrix assignment block.
 	private void removeMatrixParameters() {
 		if(objects_to_remove.size() == 0) return;

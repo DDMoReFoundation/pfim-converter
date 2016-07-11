@@ -16,6 +16,7 @@
 
 package inserm.converters.pfim.tree;
 
+import inserm.converters.pfim.CategoricalCovariateRef;
 import crx.converter.engine.common.IndividualParameterAssignment;
 import crx.converter.tree.BaseTreeMaker;
 import crx.converter.tree.BinaryTree;
@@ -29,6 +30,8 @@ public class TreeMaker_ extends BaseTreeMaker {
 	 */
 	public TreeMaker_() { super(); }
 	
+	private BinaryTree createTree(CategoricalCovariateRef cref) { return createRootTree(cref, "Categorical Covariate Reference"); }
+	
 	private BinaryTree createTree(IndividualParameterAssignment ipa) { return createRootTree(ipa, ""); }
 	
 	@Override
@@ -37,6 +40,7 @@ public class TreeMaker_ extends BaseTreeMaker {
 		flushNestedTreeReferences();
 		
 		if (o instanceof IndividualParameterAssignment) bt = createTree((IndividualParameterAssignment) o);
+		else if (o instanceof CategoricalCovariateRef) bt = createTree((CategoricalCovariateRef) o);
 		else bt = super.newInstance(o);
 		
 		return bt;

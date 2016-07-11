@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 
 import crx.converter.engine.Accessor;
+import crx.converter.engine.CategoryRef_;
 import crx.converter.engine.common.CovariateParameterRef;
 import crx.converter.spi.ILexer;
 import crx.converter.spi.blocks.CovariateBlock;
@@ -130,6 +131,7 @@ public class CovariateBlockImpl extends PartImpl implements CovariateBlock {
 				if (symbId == null) throw new NullPointerException("Covariate symbol ID is null");
 				if (!symbols.contains(symbId)) symbols.add(symbId);
 				
+				Accessor a = lexer.getAccessor();
 				if (cov.getCategorical() != null) {
 					CategoricalCovariateRef cref = new CategoricalCovariateRef(lexer, cov, getName());
 					categorical_covariates.add(cref);
@@ -139,6 +141,11 @@ public class CovariateBlockImpl extends PartImpl implements CovariateBlock {
 					categorical = true;
 					categorical_cov_names.add(cov.getSymbId());
 					
+					for (String category : cref.categories) {
+						if (category == null) continue;
+						CategoryRef_ cr = new CategoryRef_(getName(), category, "");
+						a.register(cr);
+					}
 				} else if (cov.getContinuous() != null) {
 					ContinuousCovariate continuous = cov.getContinuous();
 					if (continuous.getInterpolation() != null) 

@@ -510,6 +510,9 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		checkForContinuousCovariates();
 		sortElementOrdering();
+		
+		ParameterBlockImpl pb_ = (ParameterBlockImpl) getParameterBlock();
+		if (pb_ != null) pb_.buildFixedEffectRefs();
 	}
 	
 	private void createCovariateMap() {
@@ -1470,7 +1473,16 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	public boolean isAtLastStructuralBlock() { throw new UnsupportedOperationException(); }
 	
 	@Override
-	public boolean isCategoricalCovariate() { throw new UnsupportedOperationException(); }
+	public boolean isCategoricalCovariate() {
+		List<CovariateBlock> cbs = getCovariateBlocks();
+		
+		for (CovariateBlock cb : cbs) {
+			if (cb == null) continue;
+			if (cb.isCategorical()) return true;
+		}
+		
+		return false;
+	}
 	
 	@Override
 	public boolean isCategoricalDiscrete() { throw new UnsupportedOperationException(); }
