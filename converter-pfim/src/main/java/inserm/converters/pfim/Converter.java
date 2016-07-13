@@ -2030,7 +2030,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		for (StructuralModel sm : sms_with_macros) {
 			try {
-				MacroOutput output = tr.translate(sm, target_level);
+				MacroOutput output = tr.translate(sm, target_level, accessor.getIndependentVariable());
 				StructuralModel sm_translated = output.getStructuralModel();
 				if(!replace(dom, sm, sm_translated))
 					throw new IllegalStateException("PK macros translation failed (blkId='" + sm.getBlkId() + "')");
