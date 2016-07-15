@@ -367,6 +367,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	private boolean hasResetColumnUsageRegToCov = false;
 	private boolean is_echo_exception = true;
 	private boolean isolate_dt = true;
+	private boolean isolate_global_variables = false;
 	private boolean lexOnly = false;
 	private ILibPharmML lib = null;
 	private Map<StructuralModel, List<PKMacro>> macro_input_map = new HashMap<StructuralModel, List<PKMacro>>();
@@ -392,7 +393,6 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	 * Language source
 	 */
 	protected LanguageVersion source = null;
-	
 	/**
 	 * Target language
 	 */
@@ -401,6 +401,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	private Translator tr = new Translator();
 	private boolean translate_macros = true;
 	private boolean usePiecewiseAsEvents = false;
+	
 	private IValidationReport validation_report = null;
 	
 	public Converter() throws IOException, NullPointerException {
@@ -807,7 +808,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 			}
 		}
 	}
-	
+
 	private void doParameterContext_LinearCovariate(LinearCovariate lc) {
 		if (lc == null) return;
 		
@@ -867,7 +868,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 			}
 		}
 	}
-
+	
 	private void doParameterContext_PopulationValue_(StructuredModel.LinearCovariate.PopulationValue pv) {
 		if (pv == null) return;
 		BinaryTree bt = tm.newInstance(pv);
@@ -951,6 +952,29 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	}
 	
 	@Override
+	public List<Symbol> getContinuousOutputs() {
+		List<Symbol> outputs = new ArrayList<Symbol>();
+		List<ObservationBlock> obs = getObservationBlocks();
+		
+		for (ObservationBlock ob : obs) {
+			if (ob == null) continue;
+			ObservationModel model = ob.getModel();
+			if (model == null) continue;
+			ContinuousObservationModel com = model.getContinuousData();
+			if (com == null) continue; 
+			ObservationError oe = com.getObservationError();
+			if (oe == null) continue;
+			if (isStructuredError(oe)) {
+				StructuredObsError soe = (StructuredObsError) oe;
+				PharmMLRootType element = accessor.fetchElement(soe.getOutput());
+				if (isSymbol(element)) outputs.add((Symbol) element); 
+			}
+		}
+		
+		return outputs;
+	}
+	
+	@Override
 	public Version getConverterVersion() { return converterVersion; }
 	
 	@Override
@@ -1015,6 +1039,8 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	@Override
 	public EstimationStep getEstimationStep() { throw new UnsupportedOperationException(); }
 	
+	
+	
 	/**
 	 * Generate a conversion report with an exception
 	 * @param e Exception
@@ -1052,8 +1078,6 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		return exported_variables;
 	}
-	
-	
 	
 	@Override
 	public String getIndexSymbol(Object key) { throw new UnsupportedOperationException(); }
@@ -1094,7 +1118,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		return name;
 	}
-	
+
 	@Override
 	public Integer getModelParameterIndex(String name) {
 		Integer idx = -1;
@@ -1113,7 +1137,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		} else 
 			return new ArrayList<PopulationParameter>();
 	}
-
+	
 	@Override
 	public String getName() { return name; }
 	
@@ -1175,7 +1199,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 			
 		return pb;
 	}
-	
+
 	private ParameterContext getParameterContext(PopulationParameter p) {
 		ParameterContext ctx = null;
 		
@@ -1188,15 +1212,17 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		return ctx;
 	}
-	
+
 	@Override
 	public Map<PopulationParameter, ParameterContext> getParameterContextMap() { return param_context_map; }
 
 	@Override
 	public IParser getParser() { return parser; }
 
+	
+	
 	public ScriptDefinition getScriptDefinition() { return sd; }
-
+	
 	@Override
 	public List<String> getSimulationOutputNames() {
 		List<String> names = new ArrayList<String>();
@@ -1213,8 +1239,6 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	
 		return names;
 	}
-
-	
 	
 	@Override
 	public Map<Integer, CommonVariableDefinition> getSimulationOutputs()  {
@@ -1233,7 +1257,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	
 	@Override
 	public LanguageVersion getSource() { return source; }
-	
+ 
 	@Override
 	public BinaryTree getStatement(Object key) {
 		BinaryTree bt = null;
@@ -1260,7 +1284,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 					
 		return idx;
 	}
- 
+
 	@Override
 	public List<StructuralBlock> getStructuralBlocks() { return sd.getStructuralBlocks(); }
 	
@@ -1272,7 +1296,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		return currentSb;
 	}
-
+	
 	@Override
 	public LanguageVersion getTarget() { return target; }
 	
@@ -1306,15 +1330,15 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		return tm; 
 	}
-	
+
 	@Override
 	public TrialDesignBlock getTrialDesign() {
 		return sd.getTrialDesignBlock();
 	}
-	
+
 	@Override
 	public IValidationReport getValidationReport() { return validation_report; }
-
+	
 	@Override
 	public VariabilityBlock getVariabilityBlock(SymbolRef ref) {
 		VariabilityBlock vb = null;
@@ -1382,7 +1406,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	
 	@Override
 	public boolean hasDoneEstimation() { throw new UnsupportedOperationException(); }
-
+	
 	@Override
 	public boolean hasDosing() {
 		if (getTrialDesign() != null) {
@@ -1405,7 +1429,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		if (sb != null) return sb.hasEvents();
 		return false;
 	}
-	
+
 	@Override
 	public boolean hasExternalDatasets() { return !data_files.getExternalDataSets().isEmpty(); }
 	
@@ -1418,7 +1442,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	 * @return boolean
 	 */
 	public boolean hasResetColumnFromRegToCov() { return hasResetColumnUsageRegToCov; }
-	
+
 	@Override
 	public boolean hasSimulation() { throw new UnsupportedOperationException(); }
 
@@ -1442,10 +1466,10 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		return false;
 	}
-
+	
 	@Override 
 	public boolean hasTrialDesign() { return getTrialDesign() != null; }
-
+	
 	@Override
 	public boolean hasUntranslatedPKMacros() {
 		if (isTranslate()) return false;
@@ -1528,11 +1552,14 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	public boolean isIsolateConditionalDoseVariable() { throw new UnsupportedOperationException(); }
 	
 	@Override
-	public boolean isIsolatingDoseTimingVariable() { return isolate_dt; }
+	public boolean isIsolateGloballyScopedVariables() { return isolate_global_variables; }
 	
 	@Override
+	public boolean isIsolatingDoseTimingVariable() { return isolate_dt; }
+
+	@Override
 	public boolean isMixedEffect() { return false; }
-	
+
 	@Override
 	public boolean isModelParameter(String name) {
 		boolean isPopulationParameter = false;
@@ -1543,7 +1570,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		return isPopulationParameter;
 	}
-	
+
 	@Override
 	public boolean isObservationParameter(PopulationParameter p) {
 		if (p != null) {
@@ -1565,13 +1592,13 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		
 		return false;
 	}
-
+	
 	@Override
 	public boolean isPermitEmptyTrialDesignBlock() { return permitEmptyTrialDesignBlock; }
-
+	
 	@Override
 	public boolean isRemoveIllegalCharacters() { return remove_illegal_chars; }
-
+	
 	@Override
 	public boolean isSaveSimulationOutput() { throw new UnsupportedOperationException();}
 	
@@ -1667,10 +1694,10 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
             return getExceptionReport(e);
         }
     }
-	
+
 	@Override
 	public void permitObjectiveETAs(boolean decision) { throw new UnsupportedOperationException(); }
-	
+
 	/**
 	 * Re-map the dose target post PK Macro translation.
 	 * Override as necessary 
@@ -1701,7 +1728,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		} 
 		else throw new UnsupportedOperationException("Unrecognised target mapping context on a data column (name='" + cref.getColumnIdRef() + "')");
 	}
-	
+
 	private void remapDoseTarget(TabularDataset table, ColumnMapping mapping, List<MapType> maps) {
 		
 		if (mapping == null || maps == null || table == null) return;
@@ -1740,7 +1767,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		LogicBinOp lbop = logicalBinaryOperator("and", new Object[] {ADM_clause, DOSE_clause}, accessor);
 		piece.getCondition().setLogicBinop(lbop);
 	}
-
+	
 	private void remapDoseTargetWithAdministrationOnly(TabularDataset table, CommonVariableDefinition target, Piecewise pw) {
 		if (table == null || target == null || pw == null) return;
 		ColumnDefinition dose_col = table.getColumn(DOSE);
@@ -1798,7 +1825,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 	 * @param a Accessor handle
 	 */
 	public void setAccessor(Accessor a) { accessor = a; }
-	
+
 	@Override
 	public void setAddPlottingBlock(boolean decision) { }
 
@@ -1813,41 +1840,44 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 
 	@Override
 	public void setDom(PharmML dom) { this.dom = dom; }
-
+	
 	@Override
 	public void setDuplicateVariablesPermitted(boolean decision) { throw new UnsupportedOperationException(); }
-
+	
 	/**
 	 * Instruct a converter to actively
 	 * @param decision
 	 */
 	public void setEchoException(boolean decision) { is_echo_exception = decision; }
-
+	
 	/**
 	 * Throw exception if input model has a continuous covariate.
 	 * Otherwise the PFIM converter just returns an exception. 
 	 * @param decision Decision
 	 */
 	public void setExceptionWithContinuousCovariate(boolean decision) { exceptionWithContinuousCovariate = decision; }
-	
+
 	@Override
 	public void setFilterReservedWords(boolean decision) { filter_reserved_words = decision; }
-	
+
 	@Override
 	public void setIndexFromZero(boolean decision) { throw new UnsupportedOperationException(); }
-	
+
 	@Override
 	public void setIsolateConditionalDoseVariable(boolean decision) { throw new UnsupportedOperationException(); }
 
 	@Override
 	public void setIsolateDoseTimingVariable(boolean decision) { isolate_dt = decision; }
+	
+	@Override
+	public void setIsolateGloballyScopedVariables(boolean decision) { isolate_global_variables = decision; }
 
 	@Override
 	public void setLexOnly(boolean decision) { lexOnly = decision; }
-
+	
 	@Override
 	public void setLoadOnly(boolean decision) { throw new UnsupportedOperationException(); }
-
+	
 	@Override
 	public void setMixedEffect(boolean value) { throw new UnsupportedOperationException(); }
 	
@@ -1880,52 +1910,52 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		else
 			parser = (Parser) parser_;
 	}
-	
+
 	@Override
 	public void setPermitEmptyTrialDesignBlock(boolean decision) { permitEmptyTrialDesignBlock = decision; }
-	
+
 	@Override
 	public void setRemoveIllegalCharacters(boolean decision) { remove_illegal_chars = decision; }
-
+	
 	/**
 	 * Set the run identifier for output file stem.
 	 * @param run_id_ Run Identifier
 	 */
 	public void setRunId(String run_id_) { run_id = run_id_; }
-	
+
 	@Override
 	public void setSaveRenamedSymbolList(boolean decision) { save_renamed_symbol_list = true; }
-
+	
 	@Override
 	public void setSaveSimulationOutput(boolean decision) { throw new UnsupportedOperationException(); }
-
+	
 	@Override
 	public void setScriptDefinition(ScriptDefinition sd_) { sd = sd_; }
-	
+
 	@Override
 	public void setSortParameterModel(boolean decision) { throw new UnsupportedOperationException(); }
 
 	@Override
 	public void setSortParameterModelByClustering(boolean decision) { throw new UnsupportedOperationException(); }
-	
+
 	@Override
 	public void setSortParameterModelByContext(boolean decision) { throw new UnsupportedOperationException(); }
-	
-	@Override
-	public void setSortStructuralModel(boolean decision) { sort_structural_model = decision;	}
 
-	@Override
+    @Override
+	public void setSortStructuralModel(boolean decision) { sort_structural_model = decision;	}
+    
+    @Override
 	public void setSortStructuralModelByClustering(boolean decision) {}
 
-	@Override
+    @Override
 	public void setSortVariabilityLevels(boolean decision) { throw new UnsupportedOperationException(); }
 
-	@Override
+    @Override
 	public void setTerminateWithInvalidXML(boolean decision) { throw new UnsupportedOperationException(); }
 
     @Override
 	public void setTranslate(boolean decision) { translate_macros = decision; }
-    
+
     @Override
 	public void setTranslator(Translator tr_) { if (tr_ != null) tr = tr_; }
 
@@ -1934,18 +1964,18 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 
     @Override
 	public void setUseGlobalConditionalDoseVariable(boolean decision) { throw new UnsupportedOperationException(); }
-
-    @Override
+    
+	@Override
 	public void setUsePiecewiseAsEvents(boolean decision) { usePiecewiseAsEvents = decision; }
 
-    @Override
+	@Override
 	public void setValidateXML(boolean decision) { throw new UnsupportedOperationException(); }
 
-    private void sortElementOrdering() throws NullPointerException, IOException { 
+	private void sortElementOrdering() throws NullPointerException, IOException { 
 		if (sort_structural_model) sortStructuralBlock(getStrucuturalBlock());
 	}
 
-    private void sortStructuralBlock(StructuralBlock sb) throws NullPointerException, IOException {
+	private void sortStructuralBlock(StructuralBlock sb) throws NullPointerException, IOException {
 		if (sb == null) return;
 
 		List<PharmMLRootType> list = sb.getListOfDeclarations();
@@ -2000,7 +2030,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 
 		sb.setOrderedVariableList(ordered_variables);
 	}
-    
+
 	/**
 	 * Function called to translate PK macros.<br/>
 	 * Override to change application logic.
@@ -2054,7 +2084,7 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 		for (NestedTreeRef ref : tm.getNestedTrees()) addStatement(ref);
 		tm.getNestedTrees().clear();
 	}
-
+	
 	private void updatePKMacroDataMappings() {
 		TrialDesign td = dom.getTrialDesign();
 		if (td == null) return;
@@ -2079,27 +2109,4 @@ public class Converter extends DependencyLexer implements OptimalDesignLexer {
 
 	@Override
 	public boolean useCachedDependencyList() { throw new UnsupportedOperationException(); }
-
-	@Override
-	public List<Symbol> getContinuousOutputs() {
-		List<Symbol> outputs = new ArrayList<Symbol>();
-		List<ObservationBlock> obs = getObservationBlocks();
-		
-		for (ObservationBlock ob : obs) {
-			if (ob == null) continue;
-			ObservationModel model = ob.getModel();
-			if (model == null) continue;
-			ContinuousObservationModel com = model.getContinuousData();
-			if (com == null) continue; 
-			ObservationError oe = com.getObservationError();
-			if (oe == null) continue;
-			if (isStructuredError(oe)) {
-				StructuredObsError soe = (StructuredObsError) oe;
-				PharmMLRootType element = accessor.fetchElement(soe.getOutput());
-				if (isSymbol(element)) outputs.add((Symbol) element); 
-			}
-		}
-		
-		return outputs;
-	}
 }

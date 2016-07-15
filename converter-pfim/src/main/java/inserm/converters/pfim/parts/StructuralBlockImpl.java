@@ -69,9 +69,10 @@ public class StructuralBlockImpl extends PartImpl implements StructuralBlock, Or
 	
 	private Accessor a = null;
 	private List<BinaryTree> bts =  new ArrayList<BinaryTree>();
-	private List<PharmMLRootType> cached_declaration_list = new ArrayList<PharmMLRootType>(); 
-	private VariableDefinition doseTimingVariable = null;
+	private List<PharmMLRootType> cached_declaration_list = new ArrayList<PharmMLRootType>();
+	private VariableDefinition doseTimingVariable = null; 
 	private List<DerivativeEvent> events = new ArrayList<DerivativeEvent>();
+	private List<VariableDefinition> globals = new ArrayList<VariableDefinition>();
 	private Map<String, VariableDefinition> local_map_name = new HashMap<String, VariableDefinition>();
 	private List<VariableDefinition> locals = new ArrayList<VariableDefinition>();
 	private List<PKMacro> macro_list = null;
@@ -141,7 +142,11 @@ public class StructuralBlockImpl extends PartImpl implements StructuralBlock, Or
 				
 				if (isConditionalDoseEventTarget && lexer.isIsolateConditionalDoseVariable()) continue; // Skip so it doesn't get added to the locals list.
 				
-				locals.add(local);
+				if (lexer.isIsolateGloballyScopedVariables() && VariableDeclarationContext.GLOBAL_SCOPE.equals(ctx)) 
+					globals.add(local);
+				else 
+					locals.add(local);
+				
 				local_map_name.put(symbolId, local);
 			}
 		}
@@ -253,6 +258,9 @@ public class StructuralBlockImpl extends PartImpl implements StructuralBlock, Or
 	 */
 	public List<DerivativeEvent> getEvents() { return events; }
 	
+	@Override
+	public List<VariableDefinition> getGlobalVariables() { return globals; }
+	
 	/**
 	 * All of the declared variables in the structural model.
 	 * @return List<PharmMLRootType>
@@ -280,7 +288,7 @@ public class StructuralBlockImpl extends PartImpl implements StructuralBlock, Or
 	 * @return eu.ddmore.libpharmml.dom.modeldefn.StructuralModel
 	 */
 	public StructuralModel getModel() { return sm; }
-	
+		
 	@Override
 	public String getName() {
 		String blkId = "_RUBBISH_DEFAULT_VALUE_";
@@ -289,7 +297,7 @@ public class StructuralBlockImpl extends PartImpl implements StructuralBlock, Or
 		}
 		return blkId;
 	}
-		
+	
 	/**
 	 * Get the list of structural parameters.
 	 * @return java.util.List<eu.ddmore.libpharmml.dom.modeldefn.PopulationParameter>
@@ -355,6 +363,9 @@ public class StructuralBlockImpl extends PartImpl implements StructuralBlock, Or
 	 * @return boolean
 	 */
 	public boolean hasEvents() { return events.size() > 0; }
+	
+	@Override
+	public boolean hasGlobalVariables() { return globals.size() > 0; }
 	
 	/**
 	 * Flag that the structural model has parameters.
@@ -424,7 +435,7 @@ public class StructuralBlockImpl extends PartImpl implements StructuralBlock, Or
 	 * Flag that model is plain function, i.e. no derivatives.
 	 * @return boolean
 	 */
-	public boolean isPlainFunction() { return states.size() == 0; }
+	public boolean isPlainFunction() { return states.size() == 0; } 
 	
 	@Override
 	public boolean isRegressor(CommonVariableDefinition v) { throw new UnsupportedOperationException(); }
@@ -452,14 +463,14 @@ public class StructuralBlockImpl extends PartImpl implements StructuralBlock, Or
 		}
 		
 		return dt_something;
-	} 
-	
+	}
+
 	/**
 	 * Flag if the structural block is using untranslated PK Macros.
 	 * @return boolean
 	 */
 	public boolean isUsingUntranslatedPKMacros() { throw new UnsupportedOperationException(); }
-	
+
 	private void resetDerivativeIndices() {
 		Integer idx = 1; // R so index from one.
 		for (DerivativeVariable dv : states) {
