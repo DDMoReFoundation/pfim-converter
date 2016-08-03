@@ -50,6 +50,7 @@ import static eu.ddmore.libpharmml.dom.probonto.ParameterName.STDEV;
 import static eu.ddmore.libpharmml.dom.probonto.ParameterName.VAR;
 import static inserm.converters.pfim.OptimisationAlgorithm.FEDOROV_WYNN;
 import static inserm.converters.pfim.OptimisationAlgorithm.SIMPLEX;
+import static inserm.converters.pfim.SettingLabel.DOSE_INDENTICAL;
 import static inserm.converters.pfim.SettingLabel.GRAPH_LOGICAL;
 import static inserm.converters.pfim.SettingLabel.GRAPH_SUPA;
 import static inserm.converters.pfim.SettingLabel.OUTPUT;
@@ -108,6 +109,7 @@ import eu.ddmore.convertertoolbox.api.response.ConversionDetail;
 import eu.ddmore.libpharmml.dom.IndependentVariable;
 import eu.ddmore.libpharmml.dom.commontypes.BooleanValue;
 import eu.ddmore.libpharmml.dom.commontypes.DerivativeVariable;
+import eu.ddmore.libpharmml.dom.commontypes.FalseBoolean;
 import eu.ddmore.libpharmml.dom.commontypes.InitialCondition;
 import eu.ddmore.libpharmml.dom.commontypes.IntValue;
 import eu.ddmore.libpharmml.dom.commontypes.PharmMLRootType;
@@ -183,7 +185,8 @@ public class Parser extends BaseParser {
 	private boolean graphOnly = false;
 	private Host host = null;
 	private boolean identicalTimes = true;
-	private String leftArrayBracket = null;
+	private boolean justReturnSymbolRef = false;
+	private String leftArrayBracket = null;	
 	private int maximumIterations = 5000;
 	
 	/**
@@ -209,11 +212,12 @@ public class Parser extends BaseParser {
 	private Double rtol = 1E-08;
 	private List<Double> secondary_recorded_values = null;
 	private int simplexParameter = 20;
-	private SettingReader sr = null;
-	private String state_vector_symbol = null;	
+	private SettingReader sr = null;	
+	private String state_vector_symbol = null;
 	private String stdoutFilename = pfimStdoutFilename;
 	private TreeMaker tm = null;
 	private RandomEffectModelOption trand = RandomEffectModelOption.EXPONENTIAL;
+	
 	private boolean use_default_category_proportions = true;
 	
 	/**
@@ -293,6 +297,17 @@ public class Parser extends BaseParser {
 		return s.toString();
 	}
 	
+	private Map<VariableDefinition, String> createLocalExpressionMap(StructuralBlock sb) {
+		Map<VariableDefinition, String> local_expr_map = new HashMap<VariableDefinition, String>();
+		if (sb == null) return local_expr_map;
+		
+		justReturnSymbolRef = true;
+		for (VariableDefinition v : sb.getLocalVariables()) local_expr_map.put(v, parse(ctx, lexer.createTree(v)).trim());
+		justReturnSymbolRef = false;
+		
+		return local_expr_map;
+	}
+	
 	private String doArrayAccess(String variableName, Integer idx) {
 		String format = "%s%s%s%s";
 		
@@ -355,6 +370,8 @@ public class Parser extends BaseParser {
 		return symbol;
 	}
 	
+	
+	
 	private String doDefaultCategoryProportions(CategoricalCovariateRef cref) {
 		StringBuffer stmt = new StringBuffer(cref.getName());
 		stmt.append("=");
@@ -371,8 +388,6 @@ public class Parser extends BaseParser {
 		String format = "%s%s";
 		return String.format(format, output_state_vector_symbol, idx);
 	}
-	
-	
 	
 	protected String doElement(JAXBElement<?> element) {
 		String symbol = unassigned_symbol;
@@ -501,7 +516,7 @@ public class Parser extends BaseParser {
 	protected String doRhs(Rhs eq) {
 		TreeMaker tm = lexer.getTreeMaker();
 		return parse(new Object(), tm.newInstance(eq));
-	}
+	} 
 	
 	private String doSequence(Sequence o) {
 		String symbol = unassigned_symbol;
@@ -544,7 +559,7 @@ public class Parser extends BaseParser {
 		}
 		
 		return symbol;
-	}
+	} 
 	
 	private String doString(String v) { return v; } 
 	
@@ -555,6 +570,7 @@ public class Parser extends BaseParser {
 	
 	private String doSymbolRef(SymbolRef s) {
 		String symbol = s.getSymbIdRef();
+		if (justReturnSymbolRef) return s.getSymbIdRef();
 		
 		PharmMLRootType element = a.fetchElement(s);
 		
@@ -579,7 +595,7 @@ public class Parser extends BaseParser {
 		}
 		
 		return symbol;
-	} 
+	}
 	
 	protected String doTrue() { return "TRUE"; }
 	
@@ -601,10 +617,18 @@ public class Parser extends BaseParser {
 		
 		VectorElements elements = v.getVectorElements();
 		if (elements == null) throw new NullPointerException("Vector elements are NULL.");
-		
 		if (elements.getListOfElements().size() == 1) {
 			VectorValue value = elements.getListOfElements().get(0);
-			if (value != null) return "0.0";
+			if (value == null) return "0.0";
+			else {
+				if (lexer.hasStatement(value)) {
+					String stmt = parse(v, lexer.getStatement(value));
+					stmt = stripOuterBrackets(stmt);
+					values.add(stmt);
+					if (record_vector_values) recordVectorValues(values);
+					return stmt;
+				}
+			}
 		}
 		
 		for (VectorValue value : elements.getListOfElements()) {
@@ -752,6 +776,7 @@ public class Parser extends BaseParser {
 		setRunId("call_run");
 	}
 	
+	
 	private boolean isPiecewiseFunctionArgument(FunctionArgument arg) {
 		if (arg == null) return false;
 		if (arg.getAssign() != null) {
@@ -761,7 +786,6 @@ public class Parser extends BaseParser {
 		
 		return false;
 	}
-	
 	
 	private void loadPFIMTemplate() {
 		try {
@@ -887,7 +911,7 @@ public class Parser extends BaseParser {
 		
 		format = "sig.slope%s<-%s\n";
 		fout.write(String.format(format, label, slope));
-	}
+	} 
 	
 	// Assuming a single random effect per IP instance.
 	private String readWidth(ParameterRandomVariable rv) {
@@ -939,7 +963,7 @@ public class Parser extends BaseParser {
 		}
 		
 		return omega;
-	} 
+	}
 	
 	private void recordVectorValues(List<String> values) {
 		if (values == null) return;
@@ -960,12 +984,12 @@ public class Parser extends BaseParser {
 	 * @param sr_ Settings Reader
 	 */
 	public void register(SettingReader sr_) {  sr = sr_; }
-	
 	@Override
 	public void removeAbsolutePaths(File f) throws IOException {
 		// Do nothing as paths, string delimiters language specific
 		// so method needs to be overridden in a parser instance.
 	}
+	
 	@Override
 	protected void rootLeafHandler(Object context, Node leaf, PrintWriter fout) {
 		if (leaf == null) throw new NullPointerException("Tree leaf is NULL.");
@@ -1035,7 +1059,7 @@ public class Parser extends BaseParser {
 	 */
 	public void setOutputFIMFilename(String filename) {
 		if (filename != null) outputFIMFilename = filename;
-	}
+	} 
 	
 	/**
 	 * Set the program directory (installation path) for the PFIM R package.
@@ -1046,7 +1070,7 @@ public class Parser extends BaseParser {
 			programDirectory = dir_path;
 			programDirectory = programDirectory.replace("\\", PREFERRED_SEPERATOR);
 		}
-	} 
+	}
 	
 	/**
 	 * Specify the STDOUT filename
@@ -1307,6 +1331,7 @@ public class Parser extends BaseParser {
 		fout.write(String.format(format, value));
 	}
 	
+	
 	private void writeComputeNNIEquivalence(PrintWriter fout) {
 		if (fout == null) return;
 		TreeMaker tm = lexer.getTreeMaker();
@@ -1315,7 +1340,6 @@ public class Parser extends BaseParser {
 		String format = "compute.nni_eq<-%s\n";
 		fout.write(String.format(format, value));
 	}
-	
 	
 	private void writeComputePower(PrintWriter fout) {
 		if (fout == null) return;
@@ -1436,7 +1460,7 @@ public class Parser extends BaseParser {
 			String format = "covariate.model<-%s\n";
 			fout.write(String.format(format, covariateModelFlag));
 		}
-	}
+	} 
 	
 	private void writeCovariateName(PrintWriter fout) {
 		if (fout == null) return;
@@ -1449,7 +1473,7 @@ public class Parser extends BaseParser {
 		
 		String format = "covariate.name<-list(%s)\n";
 		fout.write(String.format(format, covariateNameValues));
-	} 
+	}
 	
 	private void writeCovariateOccassionCategory(PrintWriter fout) {
 		if (fout == null) return;
@@ -1568,7 +1592,7 @@ public class Parser extends BaseParser {
 		int i = 0;
 		for (ObservationBlock ob : obs) processErrorModel(i++, ob, fout);
 	}
-	
+
 	private void writeFedorovWynnOptions(PrintWriter fout) {
 		if (fout == null) return;
 		
@@ -1583,7 +1607,7 @@ public class Parser extends BaseParser {
 		
 		writeSamplingWindows(fout, tdb);
 	}
-
+	
 	private void writeFileModel(PrintWriter fout) {
 		if (fout == null) return;
 		String model_filename = getModelFilename();
@@ -1724,12 +1748,20 @@ public class Parser extends BaseParser {
 		else {
 			TrialDesignBlock2 tdb = (TrialDesignBlock2) lexer.getTrialDesign();
 			if (tdb.getArmCount() == 1) value = new TrueBoolean();
+			else if (tdb.getArmCount() > 1) value = new TrueBoolean();
+		}
+		
+		if (sr != null) {
+			if (sr.hasValue(DOSE_INDENTICAL)) {
+				boolean decision = Boolean.parseBoolean(sr.getValue(DOSE_INDENTICAL));
+				if (decision) value = new TrueBoolean();
+				else value = new FalseBoolean();
+			}
 		}
 		
 		if (value == null) throw new IllegalStateException("Identical dose flag not specified");
 		
 		String flag = getSymbol(value);
-		
 		String format = "dose.identical<-%s\n";
 		fout.write(String.format(format, flag));
 	}
@@ -1742,13 +1774,13 @@ public class Parser extends BaseParser {
 		String format = "identical.times<-%s\n";
 		fout.write(String.format(format, value));
 	}
-	
 	private void writeIndividualParameterAssignments(PrintWriter fout) {
 		if (fout == null) return;
 		ParameterBlockImpl pb = (ParameterBlockImpl) lexer.getParameterBlock();
 		for (Object o : pb.getIndividualParameterAssignments()) parse(o, lexer.getStatement(o), fout);
 		fout.write("\n");
 	}
+	
 	private void writeLocalVariableAssignments(PrintWriter fout, StructuralBlock sb) {
 		if (fout == null || sb == null) return;
 		
@@ -1809,7 +1841,7 @@ public class Parser extends BaseParser {
 		if (sb.isODE()) writeODEModelFunction(fout, sb);
 		else writeAnalyticalModelFunction(fout, sb);
 	}
-	
+
 	private void writeNamesDataX(PrintWriter fout) {
 		if (fout == null) return;
 		String default_xLabel = "Time";
@@ -1825,7 +1857,7 @@ public class Parser extends BaseParser {
 		format = "names.datax<-%s\n";
 		fout.write(String.format(format, cat(labels)));
 	}
-
+	
 	private void writeNamesDataY(PrintWriter fout) {
 		if (fout == null) return;
 		String default_yLabel = "Amount";
@@ -1852,12 +1884,12 @@ public class Parser extends BaseParser {
 		}
 	}
 	
+	
 	private void writeNumberOfOccassions(PrintWriter fout) {
 		if (fout == null) return;
 		TrialDesignBlock2 tdb = (TrialDesignBlock2) lexer.getTrialDesign();
 		if (!tdb.hasOccassions()) fout.write("n_occ<-1\n");
 	}
-	
 	
 	private void writeNumberOfResponses(PrintWriter fout) {
 		if (fout == null) return;
@@ -1900,17 +1932,35 @@ public class Parser extends BaseParser {
 		}
 		dv_array.append(")");
 		
-		Converter c = (Converter) lexer;
-		List<VariableDefinition> exported_variables = c.getExportedLocalVariables();
+		Accessor a = lexer.getAccessor();
+		i = 0;
+		
+		List<VariableDefinition> exported_variables = new ArrayList<VariableDefinition>();
+		Map<VariableDefinition, String> local_expr_map = createLocalExpressionMap(sb);
+		for (ObservationBlock ob : lexer.getObservationBlocks()) {
+			if (isStructuredError(ob.getObservationError())) {
+				StructuredObsError soe = (StructuredObsError) ob.getObservationError();
+				PharmMLRootType element = a.fetchElement(soe.getOutput());
+				
+				// If derivative, check if pointed at by a reference variable.
+				if (isDerivative(element)) {
+					DerivativeVariable dv = (DerivativeVariable) element;
+					for (VariableDefinition v : local_expr_map.keySet()) {
+						String expr = local_expr_map.get(v);
+						if (expr.equalsIgnoreCase(dv.getSymbId())) exported_variables.add(v);
+					}
+				} else if (isLocalVariable(element)) exported_variables.add((VariableDefinition) element);	
+			}
+		}
+		
 		boolean has_exported_variables = exported_variables.size() > 0;
-		StringBuffer exported_variables_v = new StringBuffer("c(");
+		StringBuffer exported_variables_v = new StringBuffer();
 		i = 0;
 		for (VariableDefinition v : exported_variables) {
 			if (i > 0) exported_variables_v.append(",");
 			exported_variables_v.append(getSymbol(v));
 			i++;
 		}
-		exported_variables_v.append(")");
 		
 		if (has_exported_variables) {
 			String format = "\treturn(list(%s,%s))\n";
@@ -2189,12 +2239,12 @@ public class Parser extends BaseParser {
 		
 		recorded_vector_values.clear();
 		record_vector_values = true;
-		TreeMaker tm = lexer.getTreeMaker();
 		
 		List<String> sampling_limit_vectors = new ArrayList<String>();
 		for (ElementaryDesign ed : protocol.elementary_designs) {
 			if (ed == null) continue;
 			List<SingleDesignSpace> spaces = map.get(ed);
+			
 			if (spaces == null) throw new NullPointerException("The design spaces associated with a protocol are NULL (protocol_oid='" + protocol.block + "')");
 			if (spaces.isEmpty()) continue;
 			
@@ -2209,9 +2259,8 @@ public class Parser extends BaseParser {
 			if (sampling_limits == null) 
 				throw new IllegalStateException("Unable to determine the sampling limits for observation window (oid='" + ed.observation_oid + "')");
 			
-			BinaryTree bt = tm.newInstance(sampling_limits.getNumberTimes());
-			lexer.addStatement(sampling_limits.getNumberTimes(), bt);
-			lexer.updateNestedTrees();
+			//System.err.println(sampling_limits.getNumberTimes().getAssign().getContent().);
+			BinaryTree bt = lexer.createTree(sampling_limits.getNumberTimes());
 			sampling_limit_vectors.add(parse(ctx, bt).trim());
 		}
 		record_vector_values = false;
@@ -2263,8 +2312,12 @@ public class Parser extends BaseParser {
 			for (SingleDesignSpace space : spaces) {
 				if (sampling_vector != null) break;	
 				if (space == null) continue;
-				if (space.getObservationTimes() != null) 
-					sampling_vector = parseNumericalListExpression(space.getObservationTimes(), ed.start_time_offset);
+				
+				
+				StandardAssignable expr = space.getObservationTimes();
+				if (expr != null) {
+					if (isList(expr)) sampling_vector = parseNumericalListExpression(expr, ed.start_time_offset);
+				}
 			}
 			if (sampling_vector == null) throw new NullPointerException("Unable to create a sampling vector from a design space linked to an elementary design");
 			sampling_vectors.add(sampling_vector);

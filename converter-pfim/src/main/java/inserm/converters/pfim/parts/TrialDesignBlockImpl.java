@@ -16,9 +16,7 @@
 
 package inserm.converters.pfim.parts;
 
-import static crx.converter.engine.PharmMLTypeChecker.isBolus;
-import static crx.converter.engine.PharmMLTypeChecker.isObservation;
-import static crx.converter.engine.PharmMLTypeChecker.isStructuredError;
+import static crx.converter.engine.PharmMLTypeChecker.*;
 import static crx.converter.engine.Utils.getClassName;
 
 import java.util.ArrayList;
@@ -292,7 +290,7 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 						// Register a start time with the elementary design.
 						if (oseq.getStart() != null && foundObservation) 
 							ed.start_time_offset = 
-								Double.parseDouble(p.parse(ctx, tm.newInstance(oseq.getStart())).trim());
+								Double.parseDouble(p.parse(ctx, lexer.createTree(oseq.getStart())).trim());
 					}
 				}
 			}
@@ -544,8 +542,14 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 						ed.observation_oid = window;
 						
 						for (StandardAssignable tp : tps) ed.addTimepointExpression(tp);
-						BinaryTree bt = tm.newInstance(start);
-						ed.start_time_offset = Double.parseDouble(p.parse(ctx, bt).trim());
+						
+						if (isList(start.getAssign().getContent())) {
+							String stmt = p.parse(ctx, lexer.createTree(start)).trim();
+							ed.start_time_offset = Double.parseDouble(stmt);
+						} else {
+							BinaryTree bt = tm.newInstance(start);
+							ed.start_time_offset = Double.parseDouble(p.parse(ctx, bt).trim());
+						}
 						
 						protocol.addElementDesign(ed);
 					}
@@ -919,7 +923,13 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 		
 		double start = 0.0;
 		InterventionSequence iseq = iseqs.get(0);
-		if (iseq.getStart() != null) start = Double.parseDouble(p.parse(ctx, tm.newInstance(iseq.getStart())).trim());
+		if (iseq.getStart() != null) {
+			if (isList(iseq.getStart().getAssign().getContent())) {
+				String stmt = p.parse(ctx, lexer.createTree(iseq.getStart())).trim();
+				start = Double.parseDouble(stmt);
+			} else
+				start = Double.parseDouble(p.parse(ctx, tm.newInstance(iseq.getStart())).trim());
+		}
 		
 		OidRef oref = iseq.getInterventionList().getListOfInterventionRef().get(0);
 		iseq_map.put(oid, new InterventionSequenceRef(oref, start));
@@ -936,8 +946,14 @@ public class TrialDesignBlockImpl extends PartImpl implements TrialDesignBlock2 
 		arm_2_observation_map.put(arm, oref.getOidRef());
 		
 		Double start = 0.0;
-		if (oseq.getStart() != null) 
-			start = Double.parseDouble(p.parse(ctx, tm.newInstance(oseq.getStart())).trim());
+		if (oseq.getStart() != null) {
+			if (isList(oseq.getStart().getAssign().getContent())) {
+				String stmt = p.parse(ctx, lexer.createTree(oseq.getStart())).trim();
+				start = Double.parseDouble(stmt);
+			} else
+				start = Double.parseDouble(p.parse(ctx, tm.newInstance(oseq.getStart())).trim());
+		}
+			
 		arm_observation_start_map.put(arm, start);
 	}
 	

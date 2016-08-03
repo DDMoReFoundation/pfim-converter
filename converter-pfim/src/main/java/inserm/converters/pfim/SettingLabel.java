@@ -21,6 +21,7 @@ package inserm.converters.pfim;
  */
 public enum SettingLabel {
 	ALGORITHM("algorithm"),
+	DOSE_INDENTICAL("doseIdentical"),
 	GRAPH_LOGICAL("graphLogical"),
 	GRAPH_SUPA("graphSupA"),
 	OUTPUT("output"),
